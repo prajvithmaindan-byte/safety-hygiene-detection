@@ -201,8 +201,8 @@ class StreamWorker:
             if cap.isOpened():
                 logger.info("[WORKER] Camera opened successfully")
                 try:
-                    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-                    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+                    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 360)
                     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
                 except Exception as e:
                     logger.warning(f"[WORKER] Could not set camera properties: {e}")
@@ -304,14 +304,14 @@ class StreamWorker:
                     
                     try:
                         clean_snapshot = frame[60:]
-                        _, buf = cv2.imencode('.jpg', clean_snapshot, [cv2.IMWRITE_JPEG_QUALITY, 80])
+                        _, buf = cv2.imencode('.jpg', clean_snapshot, [cv2.IMWRITE_JPEG_QUALITY, 60])
                         snapshot_b64 = base64.b64encode(buf).decode()
                     except Exception as e:
-                        logger.warning(f"[WORKER] Snapshot encode error: {e}")
+                        pointer = None
                 
                 # Encode main frame
                 try:
-                    _, buf = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+                    _, buf = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 60])
                     frame_b64 = base64.b64encode(buf).decode()
                 except Exception as e:
                     logger.error(f"[WORKER] Frame encode error: {e}")
