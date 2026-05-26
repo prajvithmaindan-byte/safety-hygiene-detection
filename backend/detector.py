@@ -28,8 +28,8 @@ def check_mask(face_landmarks, frame, frame_h, frame_w):
     Returns True if NO mask is worn (violation).
     Returns False if mask IS worn (safe).
     
-    Logic: Samples a bounding box around the mouth region.
-    If the majority of the mouth region contains skin colors, no mask is worn.
+    Logic: Samples a precise bounding box tightly focused on the mouth region.
+    If the mouth region contains skin colors, no mask is worn.
     If skin color ratio is low, it indicates a mask is covering the mouth.
     """
     # Mouth center landmark (0 or 13)
@@ -42,9 +42,9 @@ def check_mask(face_landmarks, frame, frame_h, frame_w):
     right_x = face_landmarks.landmark[454].x * frame_w
     face_width = abs(right_x - left_x)
     
-    # Define ROI size around mouth based on face width
-    rw = int(face_width * 0.22)
-    rh = int(face_width * 0.12)
+    # Tighter ROI focused strictly on the mouth to prevent cheek/chin skin leakage
+    rw = int(face_width * 0.12)
+    rh = int(face_width * 0.06)
     
     # Bounds check
     min_x = max(0, cx - rw)
@@ -62,11 +62,11 @@ def check_mask(face_landmarks, frame, frame_h, frame_w):
     # Convert to HSV
     hsv = cv2.cvtColor(mouth_roi, cv2.COLOR_BGR2HSV)
     
-    # Dual skin tone HSV thresholds (covers diverse skin tones)
-    lower1 = np.array([0, 20, 60])
-    upper1 = np.array([20, 180, 255])
-    lower2 = np.array([160, 20, 60])
-    upper2 = np.array([180, 180, 255])
+    # Robust dual skin tone HSV thresholds (fully inclusive of all skin tones and lighting conditions)
+    lower1 = np.array([0, 15, 40])
+    upper1 = np.array([20, 255, 255])
+    lower2 = np.array([160, 15, 40])
+    upper2 = np.array([180, 255, 255])
     
     mask1 = cv2.inRange(hsv, lower1, upper1)
     mask2 = cv2.inRange(hsv, lower2, upper2)
@@ -74,10 +74,12 @@ def check_mask(face_landmarks, frame, frame_h, frame_w):
     
     skin_ratio = np.sum(combined > 0) / combined.size
     
-    # If skin ratio is high (> 20%), skin is exposed -> NO mask (True = violation)
-    # If skin ratio is low (< 20%), mouth is covered by a mask -> Mask worn (False = safe)
-    # Using 0.20 as a robust divider since the lips, cheek, and chin in this area are very dominant skin regions
-    no_mask = skin_ratio > 0.20
+    # Telemetry logging to diagnose detection threshold
+    print(f"[Telemetry] Mouth Skin Ratio: {skin_ratio:.3f} | No Mask Detected: {skin_ratio > 0.25}")
+    
+    # If skin ratio is high (> 25%), skin is exposed -> NO mask (True = violation)
+    # If skin ratio is low (< 25%), mouth is covered by a mask -> Mask worn (False = safe)
+    no_mask = skin_ratio > 0.25
     return no_mask
 
 
