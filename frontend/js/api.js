@@ -359,7 +359,13 @@ function initConnectionUi() {
     badge.onclick = toggleBackendSettings;
 
     wrapper.appendChild(badge);
-    nav.insertBefore(wrapper, nav.querySelector(".audio-bar").parentNode);
+    
+    const audioBar = nav.querySelector(".audio-bar");
+    if (audioBar && audioBar.parentNode) {
+      nav.insertBefore(wrapper, audioBar.parentNode);
+    } else {
+      nav.appendChild(wrapper);
+    }
   }
   
   updateConnectionIndicator();
