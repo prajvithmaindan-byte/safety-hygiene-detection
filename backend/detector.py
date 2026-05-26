@@ -83,8 +83,8 @@ def check_nose_touching(face_landmarks, hand_landmarks, frame_h, frame_w):
     # Fingertip indices in MediaPipe Hands: Thumb(4), Index(8), Middle(12), Ring(16), Pinky(20)
     fingertips = [4, 8, 12, 16, 20]
     
-    # Scale-invariant proximity threshold (22% of face width)
-    threshold = 0.22 * face_width
+    # Scale-invariant proximity threshold (8% of face width for high accuracy)
+    threshold = 0.08 * face_width
     
     for hand in hand_landmarks:
         for idx in fingertips:
@@ -105,8 +105,8 @@ def check_hair_touching(face_landmarks, hand_landmarks, frame_h, frame_w):
     # Forehead / hairline landmarks
     hair_landmarks = [10, 338, 297, 332, 284]
     
-    # Scale-invariant proximity threshold (22% of face width)
-    threshold = 0.22 * face_width
+    # Scale-invariant proximity threshold (10% of face width for high accuracy)
+    threshold = 0.10 * face_width
     
     for hand in hand_landmarks:
         for idx in fingertips:
