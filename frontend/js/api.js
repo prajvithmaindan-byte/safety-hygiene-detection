@@ -214,7 +214,7 @@ async function smartFetch(endpoint, options = {}) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 2000); // 2 second timeout
 
-    const response = await fetch(fullUrl, { ...options, signal: controller.signal });
+    const response = await window.fetch(fullUrl, { ...options, signal: controller.signal });
     clearTimeout(timeoutId);
 
     if (!response.ok) throw new Error("HTTP error status");
