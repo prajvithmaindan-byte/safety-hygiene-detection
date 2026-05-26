@@ -70,7 +70,7 @@ def make_synthetic_frame(t):
     else:
         # Draw bare mouth structure
         cv2.ellipse(frame, (face_cx, face_cy + 55), (35, 15), 0, 0, 360, (255, 45, 85), 2)
-        violations.append({"type": "Mask Under Nose", "confidence": 0.91})
+        violations.append({"type": "No Mouth Mask", "confidence": 0.91})
     
     # 4. Handle Hand & Gesture Simulation
     hand_cx, hand_cy = 1050, 580

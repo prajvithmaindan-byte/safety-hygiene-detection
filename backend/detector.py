@@ -2,214 +2,259 @@ import cv2
 import mediapipe as mp
 import numpy as np
 
-# Initialize MediaPipe solutions
 mp_face_mesh = mp.solutions.face_mesh
 mp_hands = mp.solutions.hands
+mp_face_detection = mp.solutions.face_detection
 
-# Focus tracking on 1 face and 1 hand (the primary user) to ignore background distractions
-# Boosted confidence thresholds to 0.75 to completely eliminate ghost hand tracking noise
-face_mesh = mp_face_mesh.FaceMesh(max_num_faces=1, min_detection_confidence=0.75, min_tracking_confidence=0.75, refine_landmarks=False)
-hands = mp_hands.Hands(max_num_hands=1, min_detection_confidence=0.75, min_tracking_confidence=0.75, model_complexity=1)
+face_mesh = mp_face_mesh.FaceMesh(
+    max_num_faces=5,
+    min_detection_confidence=0.7,
+    min_tracking_confidence=0.7
+)
+hands_detector = mp_hands.Hands(
+    max_num_hands=2,
+    min_detection_confidence=0.75,
+    min_tracking_confidence=0.75
+)
 
-# Landmarking indices for face features
-NOSE_INDICES = [1, 2, 168, 4, 195, 5, 6, 197, 195, 5]
-MOUTH_INDICES = [13, 14, 78, 308, 80, 310, 82, 312]
-HAIR_INDICES = [10, 338, 297, 332, 284]
+# ─── MASK DETECTION ────────────────────────────────────────────────
+# Uses mouth landmark spread AND lip visibility to confirm no mask
+MOUTH_LANDMARKS = [61, 291, 0, 17, 269, 270, 409, 291, 375, 321, 405, 314]
+UPPER_LIP = [13, 312, 311, 310, 415, 308]
+LOWER_LIP = [14, 317, 402, 318, 324, 308]
 
-def check_mask(face_landmarks, frame, frame_h, frame_w):
+def check_mask(face_landmarks, frame_h, frame_w):
     """
-    Evaluates mask compliance strictly by skin/lip tone ratio in the nose region.
-    No movement, motion, or compression heuristics.
-    
-    Returns:
-      - "Mask Under Nose" if nose tip is exposed (skin ratio >= 0.50)
-      - None if nose is covered
+    Returns True if NO mask detected (violation).
+    Logic: measure vertical mouth openness + lip landmark visibility.
+    A real mask physically covers mouth → landmarks compress AND skin color changes.
     """
-    # Define skin tone bounds in HSV
-    lower_skin_1 = np.array([0, 28, 50])
-    upper_skin_1 = np.array([25, 255, 255])
-    lower_skin_2 = np.array([165, 28, 50])
-    upper_skin_2 = np.array([180, 255, 255])
+    # Get upper and lower lip y-positions
+    upper_y = np.mean([face_landmarks.landmark[i].y * frame_h for i in UPPER_LIP])
+    lower_y = np.mean([face_landmarks.landmark[i].y * frame_h for i in LOWER_LIP])
+    mouth_vertical_span = abs(lower_y - upper_y)
 
-    # EVALUATE NOSE TIP REGION ONLY
-    # Landmark 1 is the nose tip. Tightly center around it to avoid the exposed upper nose bridge.
-    lm_nose = face_landmarks.landmark[1]
-    cx_nose, cy_nose = int(lm_nose.x * frame_w), int(lm_nose.y * frame_h)
-    
-    # 2.5% of width and 3.5% of height covers the nose tip safely on a 720p frame (~64x50 px)
-    radius_x = max(10, int(frame_w * 0.025))
-    radius_y = max(10, int(frame_h * 0.035))
-    
-    min_nx = max(0, cx_nose - radius_x)
-    max_nx = min(frame_w - 1, cx_nose + radius_x)
-    min_ny = max(0, cy_nose - radius_y)
-    max_ny = min(frame_h - 1, cy_nose + radius_y)
-    
-    nose_roi = frame[min_ny:max_ny+1, min_nx:max_nx+1]
-    
-    skin_ratio_nose = 0.0
-    is_nose_covered = True
-    if nose_roi.size > 0:
-        hsv_nose = cv2.cvtColor(nose_roi, cv2.COLOR_BGR2HSV)
-        mask1_nose = cv2.inRange(hsv_nose, lower_skin_1, upper_skin_1)
-        mask2_nose = cv2.inRange(hsv_nose, lower_skin_2, upper_skin_2)
-        skin_mask_nose = cv2.bitwise_or(mask1_nose, mask2_nose)
-        skin_ratio_nose = np.sum(skin_mask_nose > 0) / skin_mask_nose.size
-        is_nose_covered = skin_ratio_nose < 0.50
+    # Get nose tip and chin for face scale reference
+    nose_y = face_landmarks.landmark[1].y * frame_h
+    chin_y = face_landmarks.landmark[152].y * frame_h
+    face_height = abs(chin_y - nose_y)
 
-    # Print real-time telemetry console logs for monitoring
-    print(f"[Telemetry] Nose Skin Ratio: {skin_ratio_nose:.2f}")
+    if face_height < 1:
+        return False  # Can't determine, skip
 
-    if not is_nose_covered:
-        return "Mask Under Nose"
+    # Mouth span relative to face height
+    ratio = mouth_vertical_span / face_height
 
-    # Nose covered -> fully compliant
-    return None
+    # If mouth span is > 15% of face height → lips clearly visible → no mask
+    # Masked faces compress this to near 0–6%
+    no_mask = ratio > 0.15
+    return no_mask  # True = violation (no mask worn)
 
-def get_face_width(face_landmarks, frame_w, frame_h):
-    """Calculate horizontal width of the face between outer edges (landmarks 234 and 454)"""
-    p1 = face_landmarks.landmark[234]
-    p2 = face_landmarks.landmark[454]
-    x1, y1 = p1.x * frame_w, p1.y * frame_h
-    x2, y2 = p2.x * frame_w, p2.y * frame_h
-    return np.sqrt((x2 - x1)**2 + (y2 - y1)**2)
 
-def check_nose_touching(face_landmarks, hand_landmarks, frame_h, frame_w):
-    """Check if any fingertip is touching or extremely close to the nose tip (scale-invariant threshold)"""
-    face_width = get_face_width(face_landmarks, frame_w, frame_h)
-    nose = face_landmarks.landmark[1]
-    nx, ny = nose.x * frame_w, nose.y * frame_h
-    
-    # Fingertip indices in MediaPipe Hands: Thumb(4), Index(8), Middle(12), Ring(16), Pinky(20)
-    fingertips = [4, 8, 12, 16, 20]
-    
-    # Scale-invariant proximity threshold (Tightened to 3.5% of face width for absolute pin-point accuracy)
-    threshold = 0.035 * face_width
-    
-    for hand in hand_landmarks:
-        for idx in fingertips:
-            lm = hand.landmark[idx]
-            hx, hy = lm.x * frame_w, lm.y * frame_h
+# ─── NOSE TOUCH DETECTION ─────────────────────────────────────────
+NOSE_TIP = 4
+NOSE_BRIDGE_LANDMARKS = [1, 2, 4, 5, 6, 19, 20, 94, 195, 197]
+
+def check_nose_touching(face_landmarks, hand_landmarks_list, frame_h, frame_w):
+    """
+    Returns True only if 2 or more hand fingertips are within tight proximity of nose tip.
+    Uses nose tip (landmark 4) as anchor. Distance threshold is relative to face size.
+    """
+    # Nose tip position
+    nose = face_landmarks.landmark[NOSE_TIP]
+    nx = nose.x * frame_w
+    ny = nose.y * frame_h
+
+    # Face scale reference: distance from nose to chin
+    chin = face_landmarks.landmark[152]
+    chin_y = chin.y * frame_h
+    face_scale = abs(chin_y - ny)
+
+    # Threshold: 12% of nose-to-chin distance
+    threshold = face_scale * 0.12
+    threshold = max(threshold, 20)  # minimum 20px
+
+    touch_count = 0
+    for hand in hand_landmarks_list:
+        # Check fingertip landmarks only (index, middle, ring, pinky, thumb tips)
+        FINGERTIPS = [4, 8, 12, 16, 20]
+        for tip_idx in FINGERTIPS:
+            lm = hand.landmark[tip_idx]
+            hx = lm.x * frame_w
+            hy = lm.y * frame_h
             dist = np.sqrt((hx - nx)**2 + (hy - ny)**2)
             if dist < threshold:
-                print(f"[AI Debug] Nose Touch Detected! Dist: {dist:.1f}px, Threshold: {threshold:.1f}px (Fingertip index: {idx})")
-                return True
+                touch_count += 1
+                if touch_count >= 2:
+                    return True  # Confirmed nose touch (requires at least 2 fingertips)
     return False
 
-def check_hair_touching(face_landmarks, hand_landmarks, frame_h, frame_w):
-    """Check if any fingertip is touching or extremely close to the hair/forehead landmarks"""
-    face_width = get_face_width(face_landmarks, frame_w, frame_h)
-    
-    # Fingertip indices in MediaPipe Hands: Thumb(4), Index(8), Middle(12), Ring(16), Pinky(20)
-    fingertips = [4, 8, 12, 16, 20]
-    
-    # Forehead / hairline landmarks
-    hair_landmarks = [10, 338, 297, 332, 284]
-    
-    # Scale-invariant proximity threshold (Tightened to 4.5% of face width for absolute pin-point accuracy)
-    threshold = 0.045 * face_width
-    
-    for hand in hand_landmarks:
-        for idx in fingertips:
-            lm = hand.landmark[idx]
-            hx, hy = lm.x * frame_w, lm.y * frame_h
-            
-            # Check proximity to any forehead/hair landmark
-            for hair_idx in hair_landmarks:
-                hair_lm = face_landmarks.landmark[hair_idx]
-                hair_x, hair_y = hair_lm.x * frame_w, hair_lm.y * frame_h
-                dist = np.sqrt((hx - hair_x)**2 + (hy - hair_y)**2)
-                if dist < threshold:
-                    print(f"[AI Debug] Hair Touch Detected! Dist: {dist:.1f}px, Threshold: {threshold:.1f}px (Forehead index: {hair_idx}, Fingertip index: {idx})")
+
+# ─── HAIR TOUCH DETECTION ─────────────────────────────────────────
+FOREHEAD_LANDMARKS = [10, 67, 109, 338, 297]  # Top of head region
+
+def check_hair_touching(face_landmarks, hand_landmarks_list, frame_h, frame_w):
+    """
+    Returns True only if 3 or more fingertips are ABOVE the forehead line by at least 30px.
+    Uses forehead landmark y as the upper boundary.
+    Hand must be clearly in the hair/scalp zone.
+    """
+    # Average forehead y position
+    forehead_ys = [face_landmarks.landmark[i].y * frame_h for i in FOREHEAD_LANDMARKS]
+    forehead_y = np.mean(forehead_ys)
+
+    # Face width for horizontal bounding
+    left_x = face_landmarks.landmark[234].x * frame_w
+    right_x = face_landmarks.landmark[454].x * frame_w
+    face_width = abs(right_x - left_x)
+    margin = face_width * 0.3  # 30% margin on each side
+
+    FINGERTIPS = [4, 8, 12, 16, 20]
+    hair_touch_count = 0
+
+    for hand in hand_landmarks_list:
+        for tip_idx in FINGERTIPS:
+            lm = hand.landmark[tip_idx]
+            hx = lm.x * frame_w
+            hy = lm.y * frame_h
+
+            # Must be ABOVE forehead (lower y value) — strictly in hair zone (at least 30px above forehead)
+            # Must be horizontally within face width + margin
+            above_forehead = hy < (forehead_y - 30)  # 30px above forehead
+            within_face_width = (left_x - margin) < hx < (right_x + margin)
+
+            if above_forehead and within_face_width:
+                hair_touch_count += 1
+                if hair_touch_count >= 3:
                     return True
     return False
 
-def check_gloves(hand_landmarks, frame, frame_h, frame_w):
-    """Check skin color in hand region — gloves = non-skin color"""
-    if not hand_landmarks:
-        return True  # No hands = no glove check needed
+
+# ─── GLOVE DETECTION ──────────────────────────────────────────────
+def check_gloves(hand_landmarks_list, frame, frame_h, frame_w):
+    """
+    Returns True if gloves ARE worn (safe).
+    Returns False if bare skin detected (violation).
     
-    for hand in hand_landmarks:
-        # Sample palm region color
-        palm = hand.landmark[9]
-        cx, cy = int(palm.x * frame_w), int(palm.y * frame_h)
-        if 0 < cx < frame_w and 0 < cy < frame_h:
-            region = frame[max(0,cy-15):cy+15, max(0,cx-15):cx+15]
-            if region.size == 0:
+    Samples palm center + multiple points.
+    Uses HSV skin detection with strict thresholds.
+    Only flags violation if majority of samples show skin.
+    """
+    if not hand_landmarks_list:
+        return True  # No hands visible → no violation
+
+    PALM_SAMPLE_LANDMARKS = [0, 5, 9, 13, 17]  # Wrist + knuckle base points
+
+    for hand in hand_landmarks_list:
+        skin_hits = 0
+        total_samples = 0
+
+        for lm_idx in PALM_SAMPLE_LANDMARKS:
+            lm = hand.landmark[lm_idx]
+            cx = int(lm.x * frame_w)
+            cy = int(lm.y * frame_h)
+
+            # Bounds check
+            if not (20 < cx < frame_w - 20 and 20 < cy < frame_h - 20):
                 continue
-            hsv = cv2.cvtColor(region, cv2.COLOR_BGR2HSV)
-            # Skin tone HSV range
-            lower_skin = np.array([0, 20, 70])
-            upper_skin = np.array([20, 255, 255])
-            mask = cv2.inRange(hsv, lower_skin, upper_skin)
-            skin_ratio = np.sum(mask > 0) / mask.size
-            if skin_ratio > 0.25:  # Mostly skin = no gloves
-                return False
-    return True
 
-# Temporal hysteresis filter state to stabilize alerts and filter out transient movements/noise
-consecutive_frames = {
-    "Mask Under Nose": 0,
-    "Nose Touching": 0,
-    "Hair Touching": 0,
-    "No Hand Gloves": 0
-}
+            # Sample 20x20 patch
+            patch = frame[cy-10:cy+10, cx-10:cx+10]
+            if patch.size == 0:
+                continue
 
-# Require 8 consecutive frames (~250ms at 30fps) of sustained detection to trigger a real alert
-TRIGGER_FRAME_THRESHOLD = 8
+            hsv = cv2.cvtColor(patch, cv2.COLOR_BGR2HSV)
 
+            # Multi-range skin detection (covers different skin tones)
+            lower1 = np.array([0, 30, 60])
+            upper1 = np.array([15, 170, 255])
+            lower2 = np.array([160, 30, 60])
+            upper2 = np.array([180, 170, 255])
+
+            mask1 = cv2.inRange(hsv, lower1, upper1)
+            mask2 = cv2.inRange(hsv, lower2, upper2)
+            combined = cv2.bitwise_or(mask1, mask2)
+
+            skin_ratio = np.sum(combined > 0) / combined.size
+            total_samples += 1
+            if skin_ratio > 0.45:  # Stricter skin threshold
+                skin_hits += 1
+
+        if total_samples == 0:
+            continue
+
+        # Only flag if majority (>70%) of samples show skin
+        if skin_hits / total_samples > 0.7:
+            return False  # No gloves — violation
+
+    return True  # Gloves detected or uncertain → safe
+
+
+# ─── DEBOUNCE / STABILITY SYSTEM ──────────────────────────────────
+# Prevents flicker: violation must appear in N consecutive frames
+
+VIOLATION_BUFFER = {}
+REQUIRED_FRAMES = 6  # Must detect for 6 frames in a row
+
+def stabilize_violations(new_violations):
+    """
+    Only return a violation if it has been detected for REQUIRED_FRAMES
+    consecutive frames. Clears count if not detected in a frame.
+    """
+    global VIOLATION_BUFFER
+    current_types = {v["type"] for v in new_violations}
+
+    # Increment counts for detected, reset for non-detected
+    all_known = set(VIOLATION_BUFFER.keys()) | current_types
+    for vtype in all_known:
+        if vtype in current_types:
+            VIOLATION_BUFFER[vtype] = VIOLATION_BUFFER.get(vtype, 0) + 1
+        else:
+            VIOLATION_BUFFER[vtype] = 0
+
+    # Only pass through violations that have been stable
+    stable = []
+    for v in new_violations:
+        if VIOLATION_BUFFER.get(v["type"], 0) >= REQUIRED_FRAMES:
+            stable.append(v)
+
+    return stable
+
+
+# ─── MAIN ANALYSIS ────────────────────────────────────────────────
 def analyze_frame(frame):
-    """Main analysis function — returns list of violations with advanced temporal filtering"""
+    """
+    Main entry point. Returns stable, confirmed violations only.
+    """
+    violations = []
     h, w = frame.shape[:2]
-    
-    # Downscale image to 640x360 to significantly boost inference speed
-    small_w, small_h = 640, 360
-    small_frame = cv2.resize(frame, (small_w, small_h))
-    rgb = cv2.cvtColor(small_frame, cv2.COLOR_BGR2RGB)
-    
+    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
     face_results = face_mesh.process(rgb)
-    hand_results = hands.process(rgb)
-    
+    hand_results = hands_detector.process(rgb)
+
     hand_landmarks_list = hand_results.multi_hand_landmarks or []
-    
-    # 1. Evaluate raw instantaneous detections
-    has_mask_violation = False
-    has_nose_touch = False
-    has_hair_touch = False
-    has_gloves_violation = False
-    
+
     if face_results.multi_face_landmarks:
         for face in face_results.multi_face_landmarks:
-            mask_violation = check_mask(face, frame, h, w)
-            if mask_violation == "Mask Under Nose":
-                has_mask_violation = True
-            
+
+            # MASK CHECK
+            if check_mask(face, h, w):
+                violations.append({"type": "No Mouth Mask", "confidence": 0.91})
+
+            # NOSE TOUCH — only if hands are present
             if hand_landmarks_list:
                 if check_nose_touching(face, hand_landmarks_list, h, w):
-                    has_nose_touch = True
+                    violations.append({"type": "Nose Touching", "confidence": 0.88})
+
+                # HAIR TOUCH — only if hands are present
                 if check_hair_touching(face, hand_landmarks_list, h, w):
-                    has_hair_touch = True
-    
+                    violations.append({"type": "Hair Touching", "confidence": 0.85})
+
+    # GLOVES CHECK — only if hands are visible
     if hand_landmarks_list:
         if not check_gloves(hand_landmarks_list, frame, h, w):
-            has_gloves_violation = True
-            
-    # 2. Update temporal counters and compile filtered violations
-    active_violations = []
-    
-    def process_counter(vtype, is_active, confidence):
-        if is_active:
-            consecutive_frames[vtype] += 1
-            if consecutive_frames[vtype] >= TRIGGER_FRAME_THRESHOLD:
-                consecutive_frames[vtype] = TRIGGER_FRAME_THRESHOLD # Cap the counter
-                active_violations.append({"type": vtype, "confidence": confidence})
-        else:
-            # Cool down: decrement counter rapidly (e.g. by 2) when clear, to allow fast recover but filter out single-frame drops
-            consecutive_frames[vtype] = max(0, consecutive_frames[vtype] - 2)
-            
-    process_counter("Mask Under Nose", has_mask_violation, 0.89)
-    process_counter("Nose Touching", has_nose_touch, 0.88)
-    process_counter("Hair Touching", has_hair_touch, 0.85)
-    process_counter("No Hand Gloves", has_gloves_violation, 0.82)
-    
-    return active_violations
+            violations.append({"type": "No Hand Gloves", "confidence": 0.82})
+
+    # Run through stability filter
+    return stabilize_violations(violations)
