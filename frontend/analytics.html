@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HygieneGuard — System Analytics</title>
+  <link rel="stylesheet" href="css/style.css">
+  <!-- Chart.js CDN for modern data visualization -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+
+<nav>
+  <div class="nav-brand">⬡ HYGIENEGUARD</div>
+  <div class="nav-links">
+    <a href="index.html">MONITOR</a>
+    <a href="dashboard.html">VIOLATIONS</a>
+    <a href="analytics.html" class="active">ANALYTICS</a>
+  </div>
+</nav>
+
+<div class="container" style="padding-bottom: 0;">
+  <div class="title-header">System Analytics Telemetry</div>
+</div>
+
+<!-- STATS METRICS CARDS -->
+<div class="stats-grid">
+  <div class="stat-card">
+    <div class="stat-number" id="statTotal">0</div>
+    <div class="stat-label">TOTAL VIOLATIONS</div>
+  </div>
+  
+  <div class="stat-card alert-variant">
+    <div class="stat-number" id="statMask">0</div>
+    <div class="stat-label">NO MASK DETECTIONS</div>
+  </div>
+  
+  <div class="stat-card alert-variant">
+    <div class="stat-number" id="statGloves">0</div>
+    <div class="stat-label">NO GLOVES DETECTIONS</div>
+  </div>
+  
+  <div class="stat-card">
+    <div class="stat-number" id="statCompliance">100%</div>
+    <div class="stat-label">SAFE COMPLIANCE</div>
+  </div>
+</div>
+
+<!-- DATA CHARTS -->
+<div class="charts-grid">
+  <!-- Hourly Violations Trend Card -->
+  <div class="card">
+    <div style="font-family:var(--font-display); font-size:0.75rem; letter-spacing:2px; color:var(--text-muted); margin-bottom:1rem;">
+      HOURLY VIOLATION FREQUENCY TREND
+    </div>
+    <div class="chart-container">
+      <canvas id="hourlyTrendChart"></canvas>
+    </div>
+  </div>
+
+  <!-- Violations Breakdown Doughnut Card -->
+  <div class="card">
+    <div style="font-family:var(--font-display); font-size:0.75rem; letter-spacing:2px; color:var(--text-muted); margin-bottom:1rem;">
+      VIOLATION CATEGORIES DISTRIBUTION
+    </div>
+    <div class="chart-container">
+      <canvas id="typeBreakdownChart"></canvas>
+    </div>
+  </div>
+</div>
+
+<script src="js/analytics.js"></script>
+</body>
+</html>

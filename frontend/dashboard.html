@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HygieneGuard — Violations Log</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<nav>
+  <div class="nav-brand">⬡ HYGIENEGUARD</div>
+  <div class="nav-links">
+    <a href="index.html">MONITOR</a>
+    <a href="dashboard.html" class="active">VIOLATIONS</a>
+    <a href="analytics.html">ANALYTICS</a>
+  </div>
+</nav>
+
+<div class="container">
+  <div class="title-header">Historic Violations Telemetry Database</div>
+
+  <!-- FILTERS SYSTEM -->
+  <div class="filters-bar">
+    <select class="filter-select" id="typeFilter" onchange="filterViolations()">
+      <option value="ALL">ALL DETECTIONS</option>
+      <option value="No Mouth Mask">NO MOUTH MASK</option>
+      <option value="Nose Touching">NOSE TOUCHING</option>
+      <option value="Hair Touching">HAIR TOUCHING</option>
+      <option value="No Hand Gloves">NO HAND GLOVES</option>
+    </select>
+    
+    <select class="filter-select" id="confidenceFilter" onchange="filterViolations()">
+      <option value="0">ALL CONFIDENCE LEVELS</option>
+      <option value="0.85">> 85% CONFIDENCE</option>
+      <option value="0.90">> 90% CONFIDENCE</option>
+    </select>
+    
+    <button class="btn btn-green" onclick="fetchViolations()" style="padding:0.6rem 1.2rem;">⟳ REFRESH</button>
+  </div>
+
+  <!-- DATA TABLE -->
+  <div class="violations-table-wrapper">
+    <table class="violations-table">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>VIOLATION TYPE</th>
+          <th>TIMESTAMP RECORDED</th>
+          <th>CONFIDENCE</th>
+          <th>VISUAL TELEMETRY</th>
+        </tr>
+      </thead>
+      <tbody id="violationsTableBody">
+        <tr>
+          <td colspan="5" style="text-align:center; color:var(--text-muted); padding:3rem;">
+            LOADING DETECTIONS DATABASE...
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- MODAL PHOTO VIEWER -->
+<div class="modal-overlay" id="snapshotModal" onclick="closeModal(event)">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <div class="modal-title" id="modalTitle">VIOLATION CAPTURE</div>
+      <button class="modal-close" onclick="closeModal(event)">&times;</button>
+    </div>
+    <div style="background:#000; border-radius:8px; overflow:hidden;">
+      <img id="modalImage" src="" alt="Violation Snapshot">
+    </div>
+    <div class="modal-meta">
+      <span>TIMESTAMP: <strong id="modalTimestamp">2026-05-25 18:00:00</strong></span>
+      <span>CONFIDENCE: <strong id="modalConfidence">91.0%</strong></span>
+    </div>
+  </div>
+</div>
+
+<script src="js/dashboard.js"></script>
+</body>
+</html>

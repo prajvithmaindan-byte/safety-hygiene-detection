@@ -1,0 +1,40 @@
+# Python Virtual Environments
+venv/
+.venv/
+env/
+ENV/
+bin/
+lib/
+include/
+pip-selfcheck.json
+
+# Python cache / compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Project specific databases & dynamic assets
+backend/violations.db
+backend/snapshots/
+*.db
+*.sqlite
+*.sqlite3
+
+# IDE / Editor configuration
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs and temp files
+*.log
+tmp/
+temp/
