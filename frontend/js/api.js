@@ -61,124 +61,198 @@ function isSimulationMode() {
 }
 
 // ============================================================================
-// BROWSER-SIDE LIVE AI DETECTION FOR VERCEL (MEDIAPIPE FACE-MESH & HANDS CDN)
+// PREMIUM INTERACTIVE AI SIMULATION CONTROL PANEL FOR VERCEL DEMOS
 // ============================================================================
 
-let browserFaceMesh = null;
-let browserHands = null;
-let latestFaceResults = null;
-let latestHandsResults = null;
-let isAiLoading = false;
+window.hgSimState = {
+  maskUnderNose: false,
+  noseTouching: false,
+  hairTouching: false,
+  noGloves: false,
+  autoLoop: true
+};
 
-function loadScript(src) {
-  return new Promise((resolve, reject) => {
-    const s = document.createElement('script');
-    s.src = src;
-    s.crossOrigin = "anonymous";
-    s.onload = resolve;
-    s.onerror = reject;
-    document.head.appendChild(s);
-  });
+function injectSimHud() {
+  if (document.getElementById("hudSimController")) return;
+  
+  const container = document.getElementById("cameraContainer");
+  if (!container) return;
+
+  const controller = document.createElement("div");
+  controller.id = "hudSimController";
+  controller.className = "hud-sim-controller";
+  
+  controller.innerHTML = `
+    <div class="hud-title">⬡ AI SIMULATION PANEL</div>
+    <div class="hud-btn-grid">
+      <button class="hud-btn" id="hudBtnMask" onclick="toggleSimState('maskUnderNose')">MASK BREACH</button>
+      <button class="hud-btn" id="hudBtnNose" onclick="toggleSimState('noseTouching')">NOSE TOUCH</button>
+      <button class="hud-btn" id="hudBtnHair" onclick="toggleSimState('hairTouching')">HAIR TOUCH</button>
+      <button class="hud-btn" id="hudBtnGloves" onclick="toggleSimState('noGloves')">NO GLOVES</button>
+    </div>
+    <div class="hud-footer">
+      <button class="hud-btn-loop" id="hudBtnLoop" onclick="toggleSimLoop()">⟳ AUTO LOOP: ON</button>
+    </div>
+  `;
+  container.appendChild(controller);
+  
+  // Inject standard style
+  const style = document.createElement("style");
+  style.id = "hudSimStyles";
+  style.innerHTML = `
+    .hud-sim-controller {
+      position: absolute;
+      bottom: 15px;
+      right: 15px;
+      background: rgba(10, 13, 22, 0.88);
+      border: 1px solid rgba(0, 242, 254, 0.35);
+      border-radius: 6px;
+      padding: 0.8rem;
+      font-family: 'Rajdhani', sans-serif;
+      backdrop-filter: blur(10px);
+      box-shadow: 0 10px 30px rgba(0,0,0,0.6), 0 0 15px rgba(0, 242, 254, 0.15);
+      z-index: 999;
+      width: 210px;
+      transition: all 0.3s ease;
+      animation: pulse-border 3s infinite alternate;
+    }
+    @keyframes pulse-border {
+      0% { border-color: rgba(0, 242, 254, 0.3); }
+      100% { border-color: rgba(0, 242, 254, 0.6); }
+    }
+    .hud-title {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      color: #00f2fe;
+      margin-bottom: 0.65rem;
+      text-shadow: 0 0 8px rgba(0, 242, 254, 0.5);
+      text-align: center;
+    }
+    .hud-btn-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.45rem;
+      margin-bottom: 0.65rem;
+    }
+    .hud-btn {
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid rgba(0, 242, 254, 0.15);
+      color: #8b80b0;
+      font-size: 0.65rem;
+      font-weight: 600;
+      font-family: 'Rajdhani', sans-serif;
+      padding: 0.4rem 0.2rem;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      outline: none;
+      text-align: center;
+    }
+    .hud-btn:hover {
+      background: rgba(0, 242, 254, 0.08);
+      border-color: rgba(0, 242, 254, 0.4);
+      color: #f0ecfa;
+    }
+    .hud-btn.active {
+      background: rgba(255, 0, 127, 0.15) !important;
+      border-color: #ff007f !important;
+      color: #ff007f !important;
+      text-shadow: 0 0 5px rgba(255, 0, 127, 0.4);
+      box-shadow: 0 0 5px rgba(255, 0, 127, 0.2);
+    }
+    .hud-btn-loop {
+      width: 100%;
+      background: rgba(0, 242, 254, 0.12);
+      border: 1px solid #00f2fe;
+      color: #00f2fe;
+      font-size: 0.68rem;
+      font-weight: 700;
+      font-family: 'Rajdhani', sans-serif;
+      padding: 0.4rem;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      outline: none;
+      text-align: center;
+      text-shadow: 0 0 5px rgba(0, 242, 254, 0.4);
+    }
+    .hud-btn-loop:hover {
+      background: rgba(0, 242, 254, 0.2);
+      box-shadow: 0 0 8px rgba(0, 242, 254, 0.3);
+    }
+    .hud-btn-loop.inactive {
+      background: rgba(255, 255, 255, 0.02) !important;
+      border-color: rgba(255, 255, 255, 0.15) !important;
+      color: #8b80b0 !important;
+      text-shadow: none !important;
+      box-shadow: none !important;
+    }
+  `;
+  document.head.appendChild(style);
 }
 
-async function loadMediaPipe() {
-  if (window.FaceMesh && window.Hands) return;
-  if (isAiLoading) return;
-  isAiLoading = true;
-  console.log("⚡ Loading MediaPipe client-side AI modules in browser...");
-  try {
-    // Load camera utils first, then FaceMesh and Hands CDNs
-    await loadScript("https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js");
-    await loadScript("https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js");
-    console.log("✓ MediaPipe libraries loaded successfully in browser!");
-  } catch (err) {
-    console.error("❌ Failed to load MediaPipe from CDN:", err);
-  } finally {
-    isAiLoading = false;
-  }
+function removeSimHud() {
+  const controller = document.getElementById("hudSimController");
+  if (controller) controller.remove();
+  const style = document.getElementById("hudSimStyles");
+  if (style) style.remove();
 }
 
-function initBrowserAi() {
-  if (typeof FaceMesh === 'undefined' || typeof Hands === 'undefined') {
-    console.warn("MediaPipe libraries not loaded in window yet.");
-    return;
+window.toggleSimState = function(key) {
+  // If auto loop is on, turn it off first
+  if (window.hgSimState.autoLoop) {
+    window.toggleSimLoop();
   }
   
-  if (!browserFaceMesh) {
-    browserFaceMesh = new FaceMesh({locateFile: (file) => {
-      return `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`;
-    }});
-    browserFaceMesh.setOptions({
-      maxNumFaces: 1,
-      refineLandmarks: false,
-      minDetectionConfidence: 0.5,
-      minTrackingConfidence: 0.5
-    });
-    browserFaceMesh.onResults((results) => {
-      latestFaceResults = results.multiFaceLandmarks ? results.multiFaceLandmarks[0] : null;
-    });
-  }
-
-  if (!browserHands) {
-    browserHands = new Hands({locateFile: (file) => {
-      return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
-    }});
-    browserHands.setOptions({
-      maxNumHands: 2,
-      modelComplexity: 1,
-      minDetectionConfidence: 0.5,
-      minTrackingConfidence: 0.5
-    });
-    browserHands.onResults((results) => {
-      latestHandsResults = results.multiHandLandmarks || null;
-    });
-  }
-}
-
-function getFaceWidth(face) {
-  const p1 = face[234];
-  const p2 = face[454];
-  return Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2));
-}
-
-function checkNoseTouchingJs(face, handsList) {
-  const faceWidth = getFaceWidth(face);
-  const nose = face[1]; // nose tip landmark
-  const fingertips = [4, 8, 12, 16, 20];
-  const threshold = 0.08 * faceWidth; // Same calibrated 8% threshold
-
-  for (const hand of handsList) {
-    for (const idx of fingertips) {
-      const lm = hand[idx];
-      const dist = Math.sqrt(Math.pow(lm.x - nose.x, 2) + Math.pow(lm.y - nose.y, 2));
-      if (dist < threshold) {
-        return true;
-      }
+  window.hgSimState[key] = !window.hgSimState[key];
+  
+  // Update button active state
+  const btnMap = {
+    maskUnderNose: "hudBtnMask",
+    noseTouching: "hudBtnNose",
+    hairTouching: "hudBtnHair",
+    noGloves: "hudBtnGloves"
+  };
+  
+  const btn = document.getElementById(btnMap[key]);
+  if (btn) {
+    if (window.hgSimState[key]) {
+      btn.classList.add("active");
+    } else {
+      btn.classList.remove("active");
     }
   }
-  return false;
-}
+};
 
-function checkHairTouchingJs(face, handsList) {
-  const faceWidth = getFaceWidth(face);
-  const fingertips = [4, 8, 12, 16, 20];
-  const hairLandmarks = [10, 338, 297, 332, 284];
-  const threshold = 0.10 * faceWidth; // Same calibrated 10% threshold
-
-  for (const hand of handsList) {
-    for (const idx of fingertips) {
-      const lm = hand[idx];
-      for (const hairIdx of hairLandmarks) {
-        const hairLm = face[hairIdx];
-        const dist = Math.sqrt(Math.pow(lm.x - hairLm.x, 2) + Math.pow(lm.y - hairLm.y, 2));
-        if (dist < threshold) {
-          return true;
-        }
-      }
+window.toggleSimLoop = function() {
+  window.hgSimState.autoLoop = !window.hgSimState.autoLoop;
+  const loopBtn = document.getElementById("hudBtnLoop");
+  if (loopBtn) {
+    if (window.hgSimState.autoLoop) {
+      loopBtn.innerText = "⟳ AUTO LOOP: ON";
+      loopBtn.classList.remove("inactive");
+      
+      // Reset all individual states
+      const keys = ["maskUnderNose", "noseTouching", "hairTouching", "noGloves"];
+      keys.forEach(k => {
+        window.hgSimState[k] = false;
+        const btnMap = {
+          maskUnderNose: "hudBtnMask",
+          noseTouching: "hudBtnNose",
+          hairTouching: "hudBtnHair",
+          noGloves: "hudBtnGloves"
+        };
+        const btn = document.getElementById(btnMap[k]);
+        if (btn) btn.classList.remove("active");
+      });
+    } else {
+      loopBtn.innerText = "■ MANUAL CONTROL";
+      loopBtn.classList.add("inactive");
     }
   }
-  return false;
-}
+};
 
 // Browser-based camera stream for simulation mode
 let simVideoStream = null;
@@ -194,10 +268,6 @@ async function startSimWebcam() {
     simVideoElement.srcObject = simVideoStream;
     simVideoElement.autoplay = true;
     simVideoElement.playsInline = true;
-
-    // Dynamically load and initialize MediaPipe for client-side tracking on Vercel
-    await loadMediaPipe();
-    initBrowserAi();
   } catch (err) {
     console.warn("Could not acquire browser webcam for simulation mode:", err);
   }
@@ -226,16 +296,6 @@ function drawMockFrame() {
   const ctx = canvas.getContext("2d");
 
   const isCameraActive = (simVideoElement && simVideoElement.readyState >= 2);
-
-  // Send frames to browser-side MediaPipe AI dynamically
-  if (isCameraActive) {
-    if (browserFaceMesh && mockTick % 4 === 0) {
-      browserFaceMesh.send({image: simVideoElement}).catch(()=>{});
-    }
-    if (browserHands && mockTick % 4 === 2) {
-      browserHands.send({image: simVideoElement}).catch(()=>{});
-    }
-  }
 
   // 1. Draw live webcam if running in browser
   if (isCameraActive) {
@@ -286,17 +346,53 @@ function drawMockFrame() {
     ctx.beginPath(); ctx.moveTo(320, 140); ctx.lineTo(320, 175); ctx.lineTo(305, 180); ctx.strokeStyle = "#00ff88"; ctx.stroke();
   }
 
-  // 3. Simulated states or Live browser-side AI tracking
+  // Initialize state if not present
+  if (!window.hgSimState) {
+    window.hgSimState = {
+      maskUnderNose: false,
+      noseTouching: false,
+      hairTouching: false,
+      noGloves: false,
+      autoLoop: true
+    };
+  }
+
+  // Inject simulation panel if webcam is active
+  if (isCameraActive) {
+    injectSimHud();
+  } else {
+    removeSimHud();
+  }
+
+  // 3. Simulated states (Auto Loop or Manual control Panel)
   let violations = [];
 
   if (isCameraActive) {
-    // RUN REAL-TIME CLIENT-SIDE AI FOR VERCEL LINK!
-    if (latestFaceResults && latestHandsResults) {
-      if (checkNoseTouchingJs(latestFaceResults, latestHandsResults)) {
-        violations.push({ type: "Nose Touching", confidence: 0.93 });
+    if (window.hgSimState.autoLoop) {
+      // Loop phases automatically every 2 seconds
+      const phase = Math.floor(mockTick / 60) % 5;
+      if (phase === 1) {
+        violations.push({ type: "No Mouth Mask", confidence: 0.94 });
+      } else if (phase === 2) {
+        violations.push({ type: "Nose Touching", confidence: 0.89 });
+      } else if (phase === 3) {
+        violations.push({ type: "Hair Touching", confidence: 0.86 });
+      } else if (phase === 4) {
+        violations.push({ type: "No Hand Gloves", confidence: 0.83 });
       }
-      if (checkHairTouchingJs(latestFaceResults, latestHandsResults)) {
-        violations.push({ type: "Hair Touching", confidence: 0.91 });
+    } else {
+      // Use manual floating HUD controls
+      if (window.hgSimState.maskUnderNose) {
+        violations.push({ type: "No Mouth Mask", confidence: 0.94 });
+      }
+      if (window.hgSimState.noseTouching) {
+        violations.push({ type: "Nose Touching", confidence: 0.89 });
+      }
+      if (window.hgSimState.hairTouching) {
+        violations.push({ type: "Hair Touching", confidence: 0.86 });
+      }
+      if (window.hgSimState.noGloves) {
+        violations.push({ type: "No Hand Gloves", confidence: 0.83 });
       }
     }
   } else {
