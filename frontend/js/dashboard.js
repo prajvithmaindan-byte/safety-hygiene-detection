@@ -62,9 +62,13 @@ function renderViolations(violations) {
     const badgeClass = getBadgeClass(v.type);
     const confidencePercent = Math.round(v.confidence * 100);
     
+    // Prepend getApiBase() to absolute relative paths so images load from local backend in Vercel/hybrid mode
+    const base = getApiBase();
+    const fullImgUrl = v.image ? (v.image.startsWith("http") ? v.image : base + v.image) : null;
+    
     // Thumbnail or text placeholder
-    const imageCell = v.image 
-      ? `<img class="snapshot-thumb" src="${v.image}" alt="Snapshot" onclick="openModal('${v.image}', '${v.type}', '${v.timestamp}', ${v.confidence})">`
+    const imageCell = fullImgUrl 
+      ? `<img class="snapshot-thumb" src="${fullImgUrl}" alt="Snapshot" onclick="openModal('${fullImgUrl}', '${v.type}', '${v.timestamp}', ${v.confidence})">`
       : `<span style="color:var(--text-muted); font-size:0.8rem;">N/A</span>`;
       
     return `
