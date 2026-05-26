@@ -93,11 +93,15 @@ function stopSimWebcam() {
 
 // High-tech synthetic canvas generator (runs at ~15 FPS in simulation mode)
 let mockTick = 0;
+let persistentCanvas = null;
 function drawMockFrame() {
   mockTick++;
-  const canvas = document.createElement("canvas");
-  canvas.width = 640;
-  canvas.height = 360;
+  if (!persistentCanvas) {
+    persistentCanvas = document.createElement("canvas");
+    persistentCanvas.width = 640;
+    persistentCanvas.height = 360;
+  }
+  const canvas = persistentCanvas;
   const ctx = canvas.getContext("2d");
 
   const isCameraActive = (simVideoElement && simVideoElement.readyState >= 2);
