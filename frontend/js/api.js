@@ -245,6 +245,26 @@ async function smartFetch(endpoint, options = {}) {
   const base = getApiBase();
   const fullUrl = base + endpoint;
 
+  // Always attempt to ping the live backend first when starting the camera stream
+  // to dynamically recover if the local Python server is now running!
+  if (endpoint === "/api/start") {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 2000); // 2 second timeout
+      const response = await window.fetch(fullUrl, { ...options, signal: controller.signal });
+      clearTimeout(timeoutId);
+      if (response.ok) {
+        localStorage.setItem("hg_mode", "live");
+        updateConnectionIndicator();
+        return response;
+      }
+    } catch (e) {
+      console.warn("Live backend check failed during start. Falling back to Simulation Mode.", e);
+      localStorage.setItem("hg_mode", "simulation");
+      updateConnectionIndicator();
+    }
+  }
+
   // If we already know we are in simulation, directly use mock values
   if (isSimulationMode()) {
     return handleMockEndpoints(endpoint);
