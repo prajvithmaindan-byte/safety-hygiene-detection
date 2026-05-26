@@ -6,10 +6,10 @@ import numpy as np
 mp_face_mesh = mp.solutions.face_mesh
 mp_hands = mp.solutions.hands
 
-# Lowered detection/tracking confidence to 0.4 to prevent tracking dropouts when hands overlap/occlude the face
-# Enabled high-accuracy hand model complexity=1 for precise structural tracking during overlap
-face_mesh = mp_face_mesh.FaceMesh(max_num_faces=2, min_detection_confidence=0.4, min_tracking_confidence=0.4, refine_landmarks=False)
-hands = mp_hands.Hands(max_num_hands=2, min_detection_confidence=0.4, min_tracking_confidence=0.4, model_complexity=1)
+# Focus tracking on 1 face and 1 hand (the primary user) to ignore background distractions
+# Boosted confidence thresholds to 0.75 to completely eliminate ghost hand tracking noise
+face_mesh = mp_face_mesh.FaceMesh(max_num_faces=1, min_detection_confidence=0.75, min_tracking_confidence=0.75, refine_landmarks=False)
+hands = mp_hands.Hands(max_num_hands=1, min_detection_confidence=0.75, min_tracking_confidence=0.75, model_complexity=1)
 
 # Landmarking indices for face features
 NOSE_INDICES = [1, 2, 168, 4, 195, 5, 6, 197, 195, 5]
@@ -83,8 +83,8 @@ def check_nose_touching(face_landmarks, hand_landmarks, frame_h, frame_w):
     # Fingertip indices in MediaPipe Hands: Thumb(4), Index(8), Middle(12), Ring(16), Pinky(20)
     fingertips = [4, 8, 12, 16, 20]
     
-    # Scale-invariant proximity threshold (Tightened to 5% of face width for high accuracy)
-    threshold = 0.05 * face_width
+    # Scale-invariant proximity threshold (Tightened to 3.5% of face width for absolute pin-point accuracy)
+    threshold = 0.035 * face_width
     
     for hand in hand_landmarks:
         for idx in fingertips:
@@ -106,8 +106,8 @@ def check_hair_touching(face_landmarks, hand_landmarks, frame_h, frame_w):
     # Forehead / hairline landmarks
     hair_landmarks = [10, 338, 297, 332, 284]
     
-    # Scale-invariant proximity threshold (Tightened to 6% of face width for high accuracy)
-    threshold = 0.06 * face_width
+    # Scale-invariant proximity threshold (Tightened to 4.5% of face width for absolute pin-point accuracy)
+    threshold = 0.045 * face_width
     
     for hand in hand_landmarks:
         for idx in fingertips:
