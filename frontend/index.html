@@ -5,8 +5,23 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>HygieneGuard — Live Monitor</title>
   <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/intro.css">
 </head>
 <body>
+
+<!-- PREMIUM Cyberpunk Particle Intro Splash Overlay -->
+<div id="introSplash" class="intro-splash">
+  <canvas id="introCanvas"></canvas>
+  <div class="intro-content">
+    <div class="intro-logo">⬡ HYGIENEGUARD</div>
+    <div class="intro-subtitle">AI VIGILANCE SECURITY CORE</div>
+    <div class="intro-loader-container">
+      <div class="intro-loader-bar" id="introLoaderBar"></div>
+    </div>
+    <div class="intro-status" id="introStatus">INITIATING SECURITY DISCOVERY...</div>
+  </div>
+  <button class="intro-skip-btn" onclick="skipIntro()">SKIP INTRO</button>
+</div>
 
 <nav>
   <div class="nav-brand">⬡ HYGIENEGUARD</div>
@@ -64,6 +79,7 @@
   </div>
 </div>
 
+<script src="js/intro.js"></script>
 <script src="js/api.js?v=2.0"></script>
 <script src="js/monitor.js?v=2.0"></script>
 </body>

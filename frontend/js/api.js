@@ -39,7 +39,6 @@ function isSimulationMode() {
   const customUrl = localStorage.getItem("hg_backend_url");
 
   // Force simulation mode on remote production hosts (Vercel) if no custom backend is configured
-  // This bypasses any stale local storage hg_mode values from previous sessions
   if (!isLocal && !customUrl) {
     return true;
   }
@@ -516,6 +515,9 @@ function logSimulatedViolation(violations) {
   localStorage.setItem("hg_mock_violations", JSON.stringify(mockDb));
 }
 
+// Global runtime state indicating if the live backend is offline
+window.hg_backend_offline = false;
+
 // High-performance custom fetch wrapper supporting automatic mock simulation
 async function smartFetch(endpoint, options = {}) {
   // If we already know we are in simulation, directly use mock values
@@ -535,12 +537,15 @@ async function smartFetch(endpoint, options = {}) {
 
     if (!response.ok) throw new Error("HTTP error status");
     
-    // Successfully connected to backend, verify live mode
+    // Successfully connected to backend, verify live mode and clear offline flag
     localStorage.setItem("hg_mode", "live");
+    window.hg_backend_offline = false;
+    updateConnectionIndicator();
     return response;
   } catch (err) {
-    console.warn(`Connection to Flask backend [${fullUrl}] failed. Switching to Simulation Mode.`, err);
-    localStorage.setItem("hg_mode", "simulation");
+    console.warn(`Connection to Flask backend [${fullUrl}] failed. Switching to temporary Simulation Mode.`, err);
+    // Mark as offline at runtime, but DO NOT save "simulation" permanently to localStorage
+    window.hg_backend_offline = true;
     updateConnectionIndicator();
     return handleMockEndpoints(endpoint);
   }
@@ -632,22 +637,62 @@ function updateConnectionIndicator() {
   if (!badge) return;
 
   const mode = localStorage.getItem("hg_mode") || "live";
-  const customUrl = localStorage.getItem("hg_backend_url");
 
   if (mode === "simulation") {
     badge.innerText = "⬡ SIMULATION ACTIVE";
-    badge.style.background = "rgba(255, 170, 0, 0.1)";
+    badge.style.background = "rgba(255, 170, 0, 0.12)";
     badge.style.color = "#ffaa44";
-    badge.style.border = "1px solid rgba(255, 170, 0, 0.2)";
-    badge.title = "Local backend offline or using Vercel. Showing simulated environment. Click to configure connection.";
+    badge.style.border = "1px solid rgba(255, 170, 0, 0.35)";
+    badge.style.boxShadow = "0 0 10px rgba(255, 170, 0, 0.1)";
+    badge.title = "Showing simulated demonstration environment. Click to configure connection.";
+  } else if (window.hg_backend_offline) {
+    badge.innerText = "⚠️ BACKEND OFFLINE (SIMULATED)";
+    badge.style.background = "rgba(255, 45, 85, 0.15)";
+    badge.style.color = "#ff2d55";
+    badge.style.border = "1px solid rgba(255, 45, 85, 0.35)";
+    badge.style.boxShadow = "0 0 10px rgba(255, 45, 85, 0.1)";
+    badge.title = "Local Flask server is not responding. Running in temporary simulation mode. Click to configure.";
   } else {
     badge.innerText = "⚡ BACKEND CONNECTED";
-    badge.style.background = "rgba(0, 255, 136, 0.1)";
+    badge.style.background = "rgba(0, 255, 136, 0.12)";
     badge.style.color = "#00ff88";
-    badge.style.border = "1px solid rgba(0, 255, 136, 0.2)";
+    badge.style.border = "1px solid rgba(0, 255, 136, 0.3)";
+    badge.style.boxShadow = "0 0 10px rgba(0, 255, 136, 0.1)";
     badge.title = `Communicating with local Python backend: ${getApiBase()}. Click to configure connection.`;
   }
 }
+
+let selectedModalMode = "live";
+
+window.setModalMode = function(mode) {
+  selectedModalMode = mode;
+  const liveBtn = document.getElementById("modeLiveBtn");
+  const simBtn = document.getElementById("modeSimBtn");
+  
+  if (!liveBtn || !simBtn) return;
+  
+  if (mode === "live") {
+    liveBtn.style.background = "rgba(0, 255, 136, 0.12)";
+    liveBtn.style.color = "#00ff88";
+    liveBtn.style.border = "1px solid rgba(0, 255, 136, 0.3)";
+    liveBtn.style.boxShadow = "0 0 8px rgba(0, 255, 136, 0.15)";
+    
+    simBtn.style.background = "transparent";
+    simBtn.style.color = "var(--text-muted)";
+    simBtn.style.border = "1px solid transparent";
+    simBtn.style.boxShadow = "none";
+  } else {
+    simBtn.style.background = "rgba(255, 170, 0, 0.12)";
+    simBtn.style.color = "#ffaa44";
+    simBtn.style.border = "1px solid rgba(255, 170, 0, 0.3)";
+    simBtn.style.boxShadow = "0 0 8px rgba(255, 170, 0, 0.15)";
+    
+    liveBtn.style.background = "transparent";
+    liveBtn.style.color = "var(--text-muted)";
+    liveBtn.style.border = "1px solid transparent";
+    liveBtn.style.boxShadow = "none";
+  }
+};
 
 // Open setting modal to configure local Flask server IP/URL
 function toggleBackendSettings() {
@@ -663,8 +708,18 @@ function toggleBackendSettings() {
           <span>⬡ BACKEND CONNECTION SETTINGS</span>
         </div>
         <p style="color:var(--text-muted); font-size:0.8rem; line-height:1.4; margin-bottom:1.5rem;">
-          To stream from a real webcam, enter the local URL of your running Flask server (e.g. <code style="color:#00aaff;">http://127.0.0.1:5000</code>). Leave blank to auto-detect or default to simulator.
+          Configure execution settings. Live mode triggers local webcam feed through the Flask server AI, while Simulation runs simulated frontend demos.
         </p>
+        
+        <!-- Segmented Operation Mode Control -->
+        <div style="margin-bottom:1.5rem;">
+          <label style="display:block; font-size:0.75rem; color:var(--text-muted); margin-bottom:0.5rem; letter-spacing:1px;">OPERATION MODE</label>
+          <div style="display:flex; background:#0c0f14; border:1px solid var(--border); border-radius:6px; padding:0.25rem; gap:0.25rem;">
+            <button id="modeLiveBtn" onclick="setModalMode('live')" style="flex:1; background:transparent; border:1px solid transparent; color:var(--text-muted); padding:0.55rem; border-radius:4px; font-weight:700; font-size:0.72rem; cursor:pointer; font-family:Rajdhani; transition:all 0.2s;">⚡ LIVE BACKEND</button>
+            <button id="modeSimBtn" onclick="setModalMode('simulation')" style="flex:1; background:transparent; border:1px solid transparent; color:var(--text-muted); padding:0.55rem; border-radius:4px; font-weight:700; font-size:0.72rem; cursor:pointer; font-family:Rajdhani; transition:all 0.2s;">⬡ SIMULATOR</button>
+          </div>
+        </div>
+
         <div style="margin-bottom:1.5rem;">
           <label style="display:block; font-size:0.75rem; color:var(--text-muted); margin-bottom:0.5rem; letter-spacing:1px;">FLASK SERVER URL</label>
           <input type="text" id="backendUrlInput" placeholder="http://localhost:5000" style="width:100%; padding:0.6rem 0.8rem; background:#0c0f14; border:1px solid var(--border); border-radius:4px; color:#e0e8f0; font-family:var(--font-display); font-size:0.9rem; outline:none; transition:border 0.2s;" />
@@ -688,6 +743,9 @@ function toggleBackendSettings() {
   const current = localStorage.getItem("hg_backend_url") || "";
   document.getElementById("backendUrlInput").value = current;
 
+  const currentMode = localStorage.getItem("hg_mode") || "live";
+  window.setModalMode(currentMode);
+
   modal.style.opacity = "1";
   modal.style.pointerEvents = "all";
 }
@@ -707,8 +765,8 @@ function saveBackendSettings() {
   } else {
     localStorage.setItem("hg_backend_url", val);
   }
-  // Force re-evaluation next time
-  localStorage.removeItem("hg_mode");
+  
+  localStorage.setItem("hg_mode", selectedModalMode);
   
   closeBackendSettings();
   window.location.reload();

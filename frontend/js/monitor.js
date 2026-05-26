@@ -176,12 +176,21 @@ function updateAlertState(violations) {
   const cameraContainer = document.getElementById("cameraContainer");
   const panel = document.getElementById("violationPanel");
   
+  const isSim = isSimulationMode() || window.hg_backend_offline;
+  
   if (!violations || violations.length === 0) {
     // SAFE STATE
     stopAlertTone();
     statusLight.classList.remove("violation");
-    statusText.innerText = "✓ SYSTEM STATUS: SAFE ALL CLEAR";
-    statusText.className = "status-text clear";
+    
+    if (isSim) {
+      statusText.innerText = "✓ SYSTEM STATUS: OFFLINE SIMULATION ACTIVE";
+      statusText.className = "status-text clear simulated-status";
+    } else {
+      statusText.innerText = "✓ SYSTEM STATUS: SAFE ALL CLEAR";
+      statusText.className = "status-text clear";
+    }
+    
     cameraContainer.classList.remove("violation-active");
     cameraContainer.classList.add("clear-active");
     
@@ -197,8 +206,13 @@ function updateAlertState(violations) {
     statusLight.classList.add("violation");
     
     const violationNames = violations.map(v => v.type).join(", ");
-    statusText.innerText = `⚠ SYSTEM ALERT: HYGIENE BREACH - [${violationNames.toUpperCase()}]`;
-    statusText.className = "status-text violation";
+    if (isSim) {
+      statusText.innerText = `⚠ SYSTEM ALERT (SIMULATED): HYGIENE BREACH - [${violationNames.toUpperCase()}]`;
+      statusText.className = "status-text violation simulated-violation";
+    } else {
+      statusText.innerText = `⚠ SYSTEM ALERT: HYGIENE BREACH - [${violationNames.toUpperCase()}]`;
+      statusText.className = "status-text violation";
+    }
     
     cameraContainer.classList.remove("clear-active");
     cameraContainer.classList.add("violation-active");
