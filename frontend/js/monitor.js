@@ -30,7 +30,7 @@ function startAlertTone() {
   alertOscillator.type = 'sawtooth';
   alertOscillator.frequency.setValueAtTime(380, audioCtx.currentTime);
 
-  // Soft warning volume
+  // Soft warning volume (0.04)
   alertGain.gain.setValueAtTime(0.04, audioCtx.currentTime);
 
   alertOscillator.connect(alertGain);
