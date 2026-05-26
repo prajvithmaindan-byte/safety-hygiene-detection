@@ -8,6 +8,10 @@ let alertOscillator = null;
 let alertGain = null;
 let lfoInterval = null;
 
+// Connection state
+let consecutiveErrors = 0;
+const MAX_CONSECUTIVE_ERRORS = 5;
+
 function initAudio() {
   if (!audioCtx) {
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -28,8 +32,8 @@ function startAlertTone() {
   alertOscillator.type = 'sawtooth';
   alertOscillator.frequency.setValueAtTime(380, audioCtx.currentTime);
 
-  // Soft warning volume
-  alertGain.gain.setValueAtTime(0.04, audioCtx.currentTime);
+  // REDUCED volume from 0.04 to 0.02 (50% quieter)
+  alertGain.gain.setValueAtTime(0.02, audioCtx.currentTime);
 
   alertOscillator.connect(alertGain);
   alertGain.connect(audioCtx.destination);
@@ -63,10 +67,14 @@ function stopAlertTone() {
 async function startCamera() {
   initAudio();
   try {
-    const res = await fetch(`${API_BASE}/start`, { method: 'POST' });
+    const res = await fetch(`${API_BASE}/start`, { 
+      method: 'POST',
+      timeout: 5000
+    });
     const data = await res.json();
     if (data.status === "started") {
       isStreaming = true;
+      consecutiveErrors = 0;
       document.getElementById("cameraPlaceholder").style.display = "none";
       document.getElementById("cameraFeed").style.display = "block";
       document.getElementById("startBtn").style.display = "none";
@@ -78,12 +86,13 @@ async function startCamera() {
       statusText.innerText = "✓ SYSTEM STATUS: SECURE MONITOR ACTIVE";
       statusText.className = "status-text clear";
       
+      console.log("[MONITOR] Stream started successfully");
       // Start processing loop
       pollFrame();
     }
   } catch (err) {
-    console.error("Failed to start camera", err);
-    alert("Connection Error: Backend server is not running or camera is locked.");
+    console.error("[MONITOR] Failed to start camera:", err);
+    alert("Connection Error: Backend server is not running or camera is locked.\n\nDebug: " + err.message);
   }
 }
 
@@ -97,7 +106,9 @@ async function stopCamera() {
   
   try {
     await fetch(`${API_BASE}/stop`, { method: 'POST' });
-  } catch(e) {}
+  } catch(e) {
+    console.error("[MONITOR] Error stopping stream:", e);
+  }
   
   document.getElementById("cameraFeed").style.display = "none";
   document.getElementById("cameraPlaceholder").style.display = "flex";
@@ -118,37 +129,56 @@ async function stopCamera() {
   // Reset panel placeholder
   const panel = document.getElementById("violationPanel");
   panel.innerHTML = `
-    <div id="noViolationsPlaceholder" style="height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; color:var(--text-muted); font-size:0.85rem; text-align:center; padding:1.5rem;">
+    <div id="noViolationsPlaceholder" style="height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; color:var(--text-muted); font-size:0.85rem; text-align:center;">
       <span style="color:var(--text-muted); font-size:1.5rem; margin-bottom:0.5rem;">⬡</span>
       MONITOR SHUTDOWN. CAM FEED DISCONNECTED.
     </div>
   `;
+  
+  console.log("[MONITOR] Stream stopped");
 }
 
 async function pollFrame() {
   if (!isStreaming) return;
   
   try {
-    const res = await fetch(`${API_BASE}/frame`);
-    if (!res.ok) throw new Error("Frame poll error");
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
+    
+    const res = await fetch(`${API_BASE}/frame`, {
+      signal: controller.signal
+    });
+    clearTimeout(timeoutId);
+    
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     
     // Update live frame source
     const feed = document.getElementById("cameraFeed");
-    feed.src = `data:image/jpeg;base64,${data.frame}`;
+    if (data.frame) {
+      feed.src = `data:image/jpeg;base64,${data.frame}`;
+    }
     
     // Update Violation Telemetry
     updateAlertState(data.violations);
+    consecutiveErrors = 0;  // Reset error counter on success
     
   } catch (err) {
-    console.error("Frame polling error", err);
-    // Auto disconnect on network drop
-    stopCamera();
-    return;
+    consecutiveErrors++;
+    console.error(`[MONITOR] Frame poll error (${consecutiveErrors}/${MAX_CONSECUTIVE_ERRORS}):`, err.message);
+    
+    // Auto disconnect after max errors
+    if (consecutiveErrors > MAX_CONSECUTIVE_ERRORS) {
+      console.error("[MONITOR] Max connection errors reached, auto-disconnecting");
+      stopCamera();
+      alert("Connection lost. Backend server may be down.");
+      return;
+    }
   }
   
   // Poll again after 33ms for smooth real-time stream (~30 FPS)
-  frameTimeout = setTimeout(pollFrame, 33);
+  // Slightly increased from 33ms to 40ms for stability
+  frameTimeout = setTimeout(pollFrame, 40);
 }
 
 function updateAlertState(violations) {
@@ -167,7 +197,7 @@ function updateAlertState(violations) {
     cameraContainer.classList.add("clear-active");
     
     panel.innerHTML = `
-      <div id="noViolationsPlaceholder" style="height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; color:var(--text-muted); font-size:0.85rem; text-align:center; padding:1.5rem;">
+      <div id="noViolationsPlaceholder" style="height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; color:var(--text-muted); font-size:0.85rem; text-align:center;">
         <span style="color:var(--green); font-size:1.5rem; margin-bottom:0.5rem;">✓</span>
         SECURE PERIMETER. NO HYGIENE VIOLATIONS DETECTED.
       </div>
@@ -194,5 +224,7 @@ function updateAlertState(violations) {
         </div>
       `;
     }).join('');
+    
+    console.log("[MONITOR] Violations detected:", violations.map(v => v.type));
   }
 }
