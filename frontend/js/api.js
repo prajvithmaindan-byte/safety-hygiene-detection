@@ -325,7 +325,18 @@ async function smartFetch(endpoint, options = {}) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 2000); // 2 second timeout
 
-    const response = await window.fetch(fullUrl, { ...options, signal: controller.signal });
+    // Bypass ngrok and localtunnel landing warning page checks
+    const requestHeaders = {
+      ...(options.headers || {}),
+      "ngrok-skip-browser-warning": "true",
+      "Bypass-Tunnel-Reminder": "true"
+    };
+
+    const response = await window.fetch(fullUrl, { 
+      ...options, 
+      headers: requestHeaders,
+      signal: controller.signal 
+    });
     clearTimeout(timeoutId);
 
     if (!response.ok) throw new Error("HTTP error status");
