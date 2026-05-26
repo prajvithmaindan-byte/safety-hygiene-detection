@@ -101,8 +101,10 @@ function drawMockFrame() {
   canvas.height = 360;
   const ctx = canvas.getContext("2d");
 
+  const isCameraActive = (simVideoElement && simVideoElement.readyState >= 2);
+
   // 1. Draw live webcam if running in browser
-  if (simVideoElement && simVideoElement.readyState >= 2) {
+  if (isCameraActive) {
     ctx.drawImage(simVideoElement, 0, 0, 640, 360);
     // Draw semi-translucent overlay to keep the industrial cyber aesthetic
     ctx.fillStyle = "rgba(12, 15, 20, 0.45)";
@@ -122,51 +124,60 @@ function drawMockFrame() {
     ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(640, y); ctx.stroke();
   }
 
-  // Draw concentric radar lines
-  ctx.strokeStyle = "rgba(0, 255, 136, 0.05)";
-  ctx.beginPath(); ctx.arc(320, 180, 140, 0, 2 * Math.PI); ctx.stroke();
-  ctx.beginPath(); ctx.arc(320, 180, 80, 0, 2 * Math.PI); ctx.stroke();
-
-  // 2. Neon Face outline
   const faceCX = 320;
   const faceCY = 170;
-  ctx.strokeStyle = "#00ff88";
-  ctx.lineWidth = 2;
-  ctx.shadowColor = "#00ff88";
-  ctx.shadowBlur = 10;
-  ctx.beginPath();
-  ctx.ellipse(faceCX, faceCY, 60, 80, 0, 0, 2 * Math.PI);
-  ctx.stroke();
-  ctx.shadowBlur = 0; // Reset
 
-  // Wireframe features
-  ctx.fillStyle = "#00ff88";
-  ctx.beginPath(); ctx.arc(300, 150, 4, 0, 2 * Math.PI); ctx.fill(); // Left eye
-  ctx.beginPath(); ctx.arc(340, 150, 4, 0, 2 * Math.PI); ctx.fill(); // Right eye
-  ctx.beginPath(); ctx.moveTo(320, 140); ctx.lineTo(320, 175); ctx.lineTo(305, 180); ctx.strokeStyle = "#00ff88"; ctx.stroke();
+  // Draw concentric radar lines (only when camera is NOT active)
+  if (!isCameraActive) {
+    ctx.strokeStyle = "rgba(0, 255, 136, 0.05)";
+    ctx.beginPath(); ctx.arc(320, 180, 140, 0, 2 * Math.PI); ctx.stroke();
+    ctx.beginPath(); ctx.arc(320, 180, 80, 0, 2 * Math.PI); ctx.stroke();
+  }
+
+  // 2. Neon Face outline (only when camera is NOT active)
+  if (!isCameraActive) {
+    ctx.strokeStyle = "#00ff88";
+    ctx.lineWidth = 2;
+    ctx.shadowColor = "#00ff88";
+    ctx.shadowBlur = 10;
+    ctx.beginPath();
+    ctx.ellipse(faceCX, faceCY, 60, 80, 0, 0, 2 * Math.PI);
+    ctx.stroke();
+    ctx.shadowBlur = 0; // Reset
+
+    // Wireframe features
+    ctx.fillStyle = "#00ff88";
+    ctx.beginPath(); ctx.arc(300, 150, 4, 0, 2 * Math.PI); ctx.fill(); // Left eye
+    ctx.beginPath(); ctx.arc(340, 150, 4, 0, 2 * Math.PI); ctx.fill(); // Right eye
+    ctx.beginPath(); ctx.moveTo(320, 140); ctx.lineTo(320, 175); ctx.lineTo(305, 180); ctx.strokeStyle = "#00ff88"; ctx.stroke();
+  }
 
   // 3. Simulated states (rotating loop phases)
   const phase = Math.floor(mockTick / 60) % 5;
   let violations = [];
 
-  // Face shield
+  // Face shield (only when camera is NOT active)
   if (phase !== 1) {
-    ctx.fillStyle = "rgba(0, 170, 255, 0.25)";
-    ctx.strokeStyle = "#00aaff";
-    ctx.beginPath();
-    ctx.ellipse(faceCX, faceCY + 30, 42, 28, 0, 0, Math.PI);
-    ctx.fill();
-    ctx.stroke();
-    
-    ctx.fillStyle = "#00aaff";
-    ctx.font = "bold 9px Rajdhani, monospace";
-    ctx.fillText("SHIELD ACTIVE", faceCX - 30, faceCY + 45);
+    if (!isCameraActive) {
+      ctx.fillStyle = "rgba(0, 170, 255, 0.25)";
+      ctx.strokeStyle = "#00aaff";
+      ctx.beginPath();
+      ctx.ellipse(faceCX, faceCY + 30, 42, 28, 0, 0, Math.PI);
+      ctx.fill();
+      ctx.stroke();
+      
+      ctx.fillStyle = "#00aaff";
+      ctx.font = "bold 9px Rajdhani, monospace";
+      ctx.fillText("SHIELD ACTIVE", faceCX - 30, faceCY + 45);
+    }
   } else {
-    // Red bare mouth (Mask breach)
-    ctx.strokeStyle = "#ff2d55";
-    ctx.beginPath();
-    ctx.ellipse(faceCX, faceCY + 28, 18, 8, 0, 0, 2 * Math.PI);
-    ctx.stroke();
+    if (!isCameraActive) {
+      // Red bare mouth (Mask breach)
+      ctx.strokeStyle = "#ff2d55";
+      ctx.beginPath();
+      ctx.ellipse(faceCX, faceCY + 28, 18, 8, 0, 0, 2 * Math.PI);
+      ctx.stroke();
+    }
     violations.append ? violations.append({ type: "No Mouth Mask", confidence: 0.94 }) : violations.push({ type: "No Mouth Mask", confidence: 0.94 });
   }
 
@@ -185,13 +196,15 @@ function drawMockFrame() {
   } else if (phase === 4) {
     handX = 420;
     handY = 240;
-    // Bare hand
-    ctx.fillStyle = "#ffaa44";
-    ctx.beginPath(); ctx.arc(handX, handY, 18, 0, 2 * Math.PI); ctx.fill();
+    if (!isCameraActive) {
+      // Bare hand
+      ctx.fillStyle = "#ffaa44";
+      ctx.beginPath(); ctx.arc(handX, handY, 18, 0, 2 * Math.PI); ctx.fill();
+    }
     violations.push({ type: "No Hand Gloves", confidence: 0.83 });
   }
 
-  if (phase !== 4) {
+  if (phase !== 4 && !isCameraActive) {
     // Render high-tech blue gloves
     ctx.fillStyle = "rgba(0, 170, 255, 0.4)";
     ctx.strokeStyle = "#00aaff";
@@ -213,8 +226,8 @@ function drawMockFrame() {
   ctx.font = "bold 9px Rajdhani, monospace";
   ctx.fillText("FEED: SIMULATION_ENVIRONMENT_V1.2", 18, 25);
 
-  // If active violation, highlight telemetry bounding box
-  if (violations.length > 0) {
+  // If active violation, highlight telemetry bounding box (only when camera is NOT active)
+  if (violations.length > 0 && !isCameraActive) {
     ctx.strokeStyle = "#ff2d55";
     ctx.lineWidth = 1.5;
     ctx.strokeRect(faceCX - 50, faceCY - 60, 100, 115);
