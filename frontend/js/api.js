@@ -455,4 +455,90 @@ function saveBackendSettings() {
 // Auto-run when DOM loaded
 document.addEventListener("DOMContentLoaded", () => {
   initConnectionUi();
+  initCyberSnowfall();
 });
+
+// Highly optimized, premium 60 FPS HTML5 Canvas Cyber-Snowfall Particle Effect
+function initCyberSnowfall() {
+  const canvas = document.createElement("canvas");
+  canvas.id = "cyberSnowCanvas";
+  canvas.style.cssText = "position:fixed; top:0; left:0; width:100vw; height:100vh; pointer-events:none; z-index:-1;";
+  document.body.appendChild(canvas);
+
+  const ctx = canvas.getContext("2d");
+  let width = canvas.width = window.innerWidth;
+  let height = canvas.height = window.innerHeight;
+
+  window.addEventListener("resize", () => {
+    width = canvas.width = window.innerWidth;
+    height = canvas.height = window.innerHeight;
+  });
+
+  const numParticles = 75;
+  const particles = [];
+
+  for (let i = 0; i < numParticles; i++) {
+    particles.push({
+      x: Math.random() * width,
+      y: Math.random() * height,
+      r: Math.random() * 2.2 + 0.8, // radius
+      vy: Math.random() * 1.0 + 0.4, // vertical velocity
+      vx: Math.random() * 0.8 - 0.4, // horizontal drift
+      color: Math.random() > 0.6 
+        ? "rgba(240, 236, 250, 0.7)" // Bright white snow glow
+        : (Math.random() > 0.5 ? "rgba(0, 242, 254, 0.6)" : "rgba(255, 0, 127, 0.6)") // Cyber Cyan or Cyber Magenta
+    });
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, width, height);
+    for (let i = 0; i < numParticles; i++) {
+      const p = particles[i];
+      ctx.beginPath();
+      // Glowing radial gradient for each snowflake flake
+      const grad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.r * 2.2);
+      grad.addColorStop(0, p.color);
+      grad.addColorStop(0.3, p.color);
+      grad.addColorStop(1, "rgba(0, 0, 0, 0)");
+      
+      ctx.fillStyle = grad;
+      ctx.arc(p.x, p.y, p.r * 2.2, 0, Math.PI * 2, true);
+      ctx.fill();
+    }
+    update();
+  }
+
+  function update() {
+    for (let i = 0; i < numParticles; i++) {
+      const p = particles[i];
+      p.y += p.vy;
+      p.x += p.vx;
+
+      // Re-spawn at the top if falling off the bottom
+      if (p.y > height) {
+        particles[i] = {
+          x: Math.random() * width,
+          y: -10,
+          r: p.r,
+          vy: p.vy,
+          vx: p.vx,
+          color: p.color
+        };
+      }
+      
+      // Wrap horizontal borders
+      if (p.x > width) {
+        p.x = 0;
+      } else if (p.x < 0) {
+        p.x = width;
+      }
+    }
+  }
+
+  function animate() {
+    draw();
+    requestAnimationFrame(animate);
+  }
+
+  animate();
+}
