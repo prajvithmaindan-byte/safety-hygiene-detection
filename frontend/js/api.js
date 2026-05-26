@@ -110,7 +110,7 @@ function drawMockFrame() {
   if (isCameraActive) {
     ctx.drawImage(simVideoElement, 0, 0, 640, 360);
     // Draw semi-translucent overlay to keep the industrial cyber aesthetic
-    ctx.fillStyle = "rgba(12, 15, 20, 0.45)";
+    ctx.fillStyle = "rgba(12, 15, 20, 0.25)";
     ctx.fillRect(0, 0, 640, 360);
   } else {
     // Futuristic dark mesh grid background fallback
@@ -118,7 +118,8 @@ function drawMockFrame() {
     ctx.fillRect(0, 0, 640, 360);
   }
 
-  ctx.strokeStyle = "rgba(0, 255, 136, 0.03)";
+  // Draw cyber-tech scan grid lines
+  ctx.strokeStyle = "rgba(0, 255, 136, 0.04)";
   ctx.lineWidth = 1;
   for (let x = 0; x < 640; x += 40) {
     ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, 360); ctx.stroke();
@@ -128,17 +129,109 @@ function drawMockFrame() {
   }
 
   const faceCX = 320;
-  const faceCY = 170;
+  const faceCY = 165;
+  
+  // High-tech scanning reticle circles
+  ctx.strokeStyle = isCameraActive ? "rgba(0, 255, 136, 0.1)" : "rgba(0, 255, 136, 0.05)";
+  ctx.beginPath(); ctx.arc(320, 165, 120, 0, 2 * Math.PI); ctx.stroke();
+  ctx.beginPath(); ctx.arc(320, 165, 60, 0, 2 * Math.PI); ctx.stroke();
 
-  // Draw concentric radar lines (only when camera is NOT active)
-  if (!isCameraActive) {
-    ctx.strokeStyle = "rgba(0, 255, 136, 0.05)";
-    ctx.beginPath(); ctx.arc(320, 180, 140, 0, 2 * Math.PI); ctx.stroke();
-    ctx.beginPath(); ctx.arc(320, 180, 80, 0, 2 * Math.PI); ctx.stroke();
-  }
+  // Dynamic automatic simulator cycle loop (every ~80 ticks per phase)
+  const phase = Math.floor(mockTick / 80) % 5;
+  let violations = [];
 
-  // 2. Neon Face outline (only when camera is NOT active)
-  if (!isCameraActive) {
+  // Face shield & Facial indicators
+  if (isCameraActive) {
+    // Draw real-time face tracking box overlay on webcam!
+    const trackColor = phase === 0 ? "#00ff88" : "#ff2d55";
+    ctx.strokeStyle = trackColor;
+    ctx.lineWidth = 1.5;
+    ctx.shadowColor = trackColor;
+    ctx.shadowBlur = 6;
+    
+    // Draw bounding box corners to look high-tech
+    const boxX = faceCX - 70;
+    const boxY = faceCY - 85;
+    const boxW = 140;
+    const boxH = 170;
+    
+    ctx.strokeRect(boxX, boxY, boxW, boxH);
+    ctx.shadowBlur = 0;
+
+    // Corner brackets
+    ctx.fillStyle = trackColor;
+    ctx.fillRect(boxX - 2, boxY - 2, 15, 3);
+    ctx.fillRect(boxX - 2, boxY - 2, 3, 15);
+    ctx.fillRect(boxX + boxW - 13, boxY - 2, 15, 3);
+    ctx.fillRect(boxX + boxW - 1, boxY - 2, 3, 15);
+    ctx.fillRect(boxX - 2, boxY + boxH - 1, 15, 3);
+    ctx.fillRect(boxX - 2, boxY + boxH - 13, 3, 15);
+    ctx.fillRect(boxX + boxW - 13, boxY + boxH - 1, 15, 3);
+    ctx.fillRect(boxX + boxW - 1, boxY + boxH - 13, 3, 15);
+
+    // Text label above face
+    ctx.font = "bold 9px Rajdhani, monospace";
+    ctx.fillText("SUBJECT_01_TRACKED", boxX + 5, boxY - 6);
+
+    // Interactive custom state toggle OR fallback to automatic demo loop
+    const activeBreach = {
+      maskUnderNose: window.hgSimState.maskUnderNose || (phase === 1),
+      noseTouching: window.hgSimState.noseTouching || (phase === 2),
+      hairTouching: window.hgSimState.hairTouching || (phase === 3),
+      noGloves: window.hgSimState.noGloves || (phase === 4)
+    };
+
+    if (activeBreach.maskUnderNose) {
+      violations.push({ type: "No Mouth Mask", confidence: 0.94 });
+      ctx.strokeStyle = "#ff2d55";
+      ctx.strokeRect(faceCX - 25, faceCY + 20, 50, 25);
+      ctx.fillStyle = "#ff2d55";
+      ctx.fillText("BREACH: NO MASK", faceCX - 23, faceCY + 15);
+    } else {
+      // Shield Active overlay
+      ctx.strokeStyle = "#00aaff";
+      ctx.strokeRect(faceCX - 25, faceCY + 20, 50, 25);
+      ctx.fillStyle = "#00aaff";
+      ctx.fillText("MASK ACTIVE", faceCX - 23, faceCY + 15);
+    }
+
+    let handX = 490;
+    let handY = 250;
+
+    if (activeBreach.noseTouching) {
+      violations.push({ type: "Nose Touching", confidence: 0.89 });
+      handX = faceCX - 10;
+      handY = faceCY + 5;
+      
+      ctx.strokeStyle = "#ff2d55";
+      ctx.beginPath(); ctx.arc(handX, handY, 15, 0, 2 * Math.PI); ctx.stroke();
+      ctx.fillStyle = "#ff2d55";
+      ctx.fillText("NOSE TOUCH DETECTED", handX + 20, handY + 5);
+    } else if (activeBreach.hairTouching) {
+      violations.push({ type: "Hair Touching", confidence: 0.86 });
+      handX = faceCX;
+      handY = faceCY - 90;
+      
+      ctx.strokeStyle = "#ff2d55";
+      ctx.beginPath(); ctx.arc(handX, handY, 15, 0, 2 * Math.PI); ctx.stroke();
+      ctx.fillStyle = "#ff2d55";
+      ctx.fillText("HAIR TOUCH DETECTED", handX + 20, handY + 5);
+    } else if (activeBreach.noGloves) {
+      violations.push({ type: "No Hand Gloves", confidence: 0.83 });
+      ctx.strokeStyle = "#ff2d55";
+      ctx.strokeRect(handX - 20, handY - 20, 40, 40);
+      ctx.fillStyle = "#ff2d55";
+      ctx.fillText("BREACH: NO GLOVES", handX - 25, handY - 28);
+    } else {
+      // Gloves standard safe trace
+      ctx.strokeStyle = "#00aaff";
+      ctx.strokeRect(handX - 20, handY - 20, 40, 40);
+      ctx.fillStyle = "#00aaff";
+      ctx.fillText("GLOVES DETECTED", handX - 25, handY - 28);
+    }
+
+  } else {
+    // 2. Futuristic Neon Face outline (Offline Fallback Loop)
     ctx.strokeStyle = "#00ff88";
     ctx.lineWidth = 2;
     ctx.shadowColor = "#00ff88";
@@ -150,43 +243,10 @@ function drawMockFrame() {
 
     // Wireframe features
     ctx.fillStyle = "#00ff88";
-    ctx.beginPath(); ctx.arc(300, 150, 4, 0, 2 * Math.PI); ctx.fill(); // Left eye
-    ctx.beginPath(); ctx.arc(340, 150, 4, 0, 2 * Math.PI); ctx.fill(); // Right eye
-    ctx.beginPath(); ctx.moveTo(320, 140); ctx.lineTo(320, 175); ctx.lineTo(305, 180); ctx.strokeStyle = "#00ff88"; ctx.stroke();
-  }
+    ctx.beginPath(); ctx.arc(300, 145, 4, 0, 2 * Math.PI); ctx.fill(); // Left eye
+    ctx.beginPath(); ctx.arc(340, 145, 4, 0, 2 * Math.PI); ctx.fill(); // Right eye
+    ctx.beginPath(); ctx.moveTo(320, 135); ctx.lineTo(320, 170); ctx.lineTo(305, 175); ctx.strokeStyle = "#00ff88"; ctx.stroke();
 
-  // Initialize state if not present
-  if (!window.hgSimState) {
-    window.hgSimState = {
-      maskUnderNose: false,
-      noseTouching: false,
-      hairTouching: false,
-      noGloves: false,
-      autoLoop: false
-    };
-  }
-
-  // 3. Simulated states (Auto Loop or Manual control Panel)
-  let violations = [];
-
-  if (isCameraActive) {
-    // Use manual floating HUD controls only
-    if (window.hgSimState.maskUnderNose) {
-      violations.push({ type: "No Mouth Mask", confidence: 0.94 });
-    }
-    if (window.hgSimState.noseTouching) {
-      violations.push({ type: "Nose Touching", confidence: 0.89 });
-    }
-    if (window.hgSimState.hairTouching) {
-      violations.push({ type: "Hair Touching", confidence: 0.86 });
-    }
-    if (window.hgSimState.noGloves) {
-      violations.push({ type: "No Hand Gloves", confidence: 0.83 });
-    }
-  } else {
-    // Static offline fallback loop
-    const phase = Math.floor(mockTick / 60) % 5;
-    
     // Face shield (only when camera is NOT active)
     if (phase !== 1) {
       ctx.fillStyle = "rgba(0, 170, 255, 0.25)";
@@ -244,15 +304,15 @@ function drawMockFrame() {
   ctx.beginPath(); ctx.moveTo(0, scanY); ctx.lineTo(640, scanY); ctx.stroke();
 
   // 5. Tech Overlays
-  ctx.fillStyle = "rgba(20, 25, 30, 0.8)";
-  ctx.fillRect(10, 10, 220, 25);
+  ctx.fillStyle = "rgba(20, 25, 30, 0.85)";
+  ctx.fillRect(10, 10, 230, 25);
   ctx.strokeStyle = "#00ff88";
-  ctx.strokeRect(10, 10, 220, 25);
+  ctx.strokeRect(10, 10, 230, 25);
   ctx.fillStyle = "#00ff88";
   ctx.font = "bold 9px Rajdhani, monospace";
   ctx.fillText("FEED: SIMULATION_ENVIRONMENT_V1.2", 18, 25);
 
-  // If active violation, highlight telemetry bounding box (only when camera is NOT active)
+  // If active violation and camera is NOT active, highlight telemetry bounding box
   if (violations.length > 0 && !isCameraActive) {
     ctx.strokeStyle = "#ff2d55";
     ctx.lineWidth = 1.5;

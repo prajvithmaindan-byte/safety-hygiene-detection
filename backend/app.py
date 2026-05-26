@@ -139,6 +139,7 @@ class StreamWorker:
         self.lock = threading.Lock()
         self.last_log_time = {}
         self.frame_count = 0
+        self.frame_id = 0
 
     def start(self):
         with self.lock:
@@ -179,13 +180,15 @@ class StreamWorker:
             try:
                 ret, frame = cap.read()
                 if not ret:
-                    break
+                    time.sleep(0.01)
+                    continue
                 with self.lock:
                     self.latest_raw_frame = frame
+                    self.frame_id += 1
             except Exception as e:
                 logger.warning(f"[GRABBER] Frame grab error: {e}")
                 break
-            time.sleep(0.001)
+            time.sleep(0.01)
 
     def _run(self):
         try:
@@ -201,14 +204,26 @@ class StreamWorker:
             if cap.isOpened():
                 logger.info("[WORKER] Camera opened successfully")
                 try:
-                    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-                    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 360)
+                    # Request standard 1280x720 which is universally supported
+                    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+                    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
                     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
                 except Exception as e:
                     logger.warning(f"[WORKER] Could not set camera properties: {e}")
                 
                 # Read first frame to verify camera works
                 ret, frame = cap.read()
+                if not ret or frame is None:
+                    logger.warning("[WORKER] Failed to read at 1280x720. Trying default camera resolution...")
+                    try:
+                        cap.release()
+                    except Exception:
+                        pass
+                    cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+                    if not cap.isOpened():
+                        cap = cv2.VideoCapture(0)
+                    ret, frame = cap.read()
+                
                 if not ret or frame is None:
                     logger.warning("[WORKER] Camera opened but cannot read frames. Using mock mode.")
                     self.is_using_mock = True
@@ -222,6 +237,7 @@ class StreamWorker:
                     logger.info("[WORKER] Camera frame read successful. Real mode enabled.")
                     self.is_using_mock = False
                     with self.lock:
+                        self.cap = cap
                         self.latest_raw_frame = frame
                     # Start grabber thread
                     self.grabber_thread = threading.Thread(target=self._grab_frames)
@@ -235,6 +251,7 @@ class StreamWorker:
             self.is_using_mock = True
 
         logger.info(f"[WORKER] Stream mode: {'MOCK' if self.is_using_mock else 'REAL'}")
+        last_processed_id = -1
         tick_count = 0
         
         while True:
@@ -253,10 +270,23 @@ class StreamWorker:
                 else:
                     with self.lock:
                         frame = self.latest_raw_frame
+                        current_id = self.frame_id
                     
-                    if frame is None or frame.shape[0] < 100 or frame.shape[1] < 100:
+                    if frame is None or current_id == last_processed_id:
+                        time.sleep(0.01) # Wait for a new frame
+                        continue
+                    
+                    last_processed_id = current_id
+                    
+                    if frame.shape[0] < 50 or frame.shape[1] < 50:
                         time.sleep(0.01)
                         continue
+                    
+                    # Resize to 640x360 for high-performance processing and network speed
+                    try:
+                        frame = cv2.resize(frame, (640, 360))
+                    except Exception as e:
+                        logger.warning(f"[WORKER] Resize error: {e}")
                     
                     # Copy frame for thread-safe processing
                     frame = frame.copy()
