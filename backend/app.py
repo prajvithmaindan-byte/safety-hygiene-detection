@@ -298,14 +298,14 @@ class StreamWorker:
                         logger.error(f"[WORKER] Frame analysis error: {e}")
                         violations = []
 
-                # Draw status overlay
+                # Draw status overlay (scaled perfectly for 640x360 resolution and ASCII safety)
                 try:
                     status_color = (85, 255, 0) if not violations else (85, 45, 255)
-                    cv2.rectangle(frame, (0, 0), (frame.shape[1], 60), (10, 13, 18), -1)
-                    cv2.line(frame, (0, 60), (frame.shape[1], 60), status_color, 2)
+                    cv2.rectangle(frame, (0, 0), (frame.shape[1], 35), (10, 13, 18), -1)
+                    cv2.line(frame, (0, 35), (frame.shape[1], 35), status_color, 1)
                     
-                    status_text = "✓ STATUS: ALL CLEAR" if not violations else f"⚠ VIOLATION: {', '.join(v['type'] for v in violations)}"
-                    cv2.putText(frame, status_text.upper(), (20, 42), cv2.FONT_HERSHEY_SIMPLEX, 0.7, status_color, 2)
+                    status_text = "SYSTEM STATUS: SECURE" if not violations else f"BREACH DETECTED: {', '.join(v['type'] for v in violations)}"
+                    cv2.putText(frame, status_text.upper(), (15, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.45, status_color, 1)
                 except Exception as e:
                     logger.warning(f"[WORKER] Overlay drawing error: {e}")
 
@@ -333,7 +333,7 @@ class StreamWorker:
                             logger.error(f"[WORKER] Snapshot save error: {e}")
                     
                     try:
-                        clean_snapshot = frame[60:]
+                        clean_snapshot = frame[35:]
                         _, buf = cv2.imencode('.jpg', clean_snapshot, [cv2.IMWRITE_JPEG_QUALITY, 60])
                         snapshot_b64 = base64.b64encode(buf).decode()
                     except Exception as e:
