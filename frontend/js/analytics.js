@@ -1,4 +1,6 @@
+// Use smartFetch client wrapper for seamless Simulation/Live backend routing
 const API_BASE = "/api";
+const fetch = smartFetch;
 let hourlyChartInstance = null;
 let typeChartInstance = null;
 
