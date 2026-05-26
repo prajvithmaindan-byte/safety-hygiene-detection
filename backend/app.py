@@ -254,7 +254,7 @@ class StreamWorker:
                     with self.lock:
                         frame = self.latest_raw_frame
                     
-                    if frame is None:
+                    if frame is None or frame.shape[0] < 100 or frame.shape[1] < 100:
                         time.sleep(0.01)
                         continue
                     

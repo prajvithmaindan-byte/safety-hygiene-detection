@@ -127,13 +127,24 @@ async function stopCamera() {
   `;
 }
 
+let consecutivePollErrors = 0;
+const MAX_POLL_ERRORS = 3;
+
 async function pollFrame() {
   if (!isStreaming) return;
   
   try {
-    const res = await fetch(`${API_BASE}/frame`);
-    if (!res.ok) throw new Error("Frame poll error");
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 1500); // 1.5s timeout for frame fetch
+    
+    const res = await fetch(`${API_BASE}/frame`, { signal: controller.signal });
+    clearTimeout(timeoutId);
+    
+    if (!res.ok) throw new Error("Server responded with error status");
     const data = await res.json();
+    
+    // Reset error counter
+    consecutivePollErrors = 0;
     
     // Update live frame source
     const feed = document.getElementById("cameraFeed");
@@ -143,10 +154,16 @@ async function pollFrame() {
     updateAlertState(data.violations);
     
   } catch (err) {
-    console.error("Frame polling error", err);
-    // Auto disconnect on network drop
-    stopCamera();
-    return;
+    consecutivePollErrors++;
+    console.error(`Frame polling error (${consecutivePollErrors}/${MAX_POLL_ERRORS})`, err);
+    
+    if (consecutivePollErrors >= MAX_POLL_ERRORS) {
+      console.warn("Too many consecutive polling errors. Automatically disconnecting from server.");
+      // Auto disconnect on network drop
+      stopCamera();
+      alert("Lost Connection: The backend server stopped responding or went offline.");
+      return;
+    }
   }
   
   // Poll again after 33ms for smooth real-time stream (~30 FPS)
