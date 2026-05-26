@@ -35,6 +35,38 @@ function isSimulationMode() {
   return localStorage.getItem("hg_mode") === "simulation";
 }
 
+// Browser-based camera stream for simulation mode
+let simVideoStream = null;
+let simVideoElement = null;
+
+async function startSimWebcam() {
+  if (simVideoStream) return;
+  try {
+    simVideoStream = await navigator.mediaDevices.getUserMedia({
+      video: { width: 640, height: 360 }
+    });
+    simVideoElement = document.createElement("video");
+    simVideoElement.srcObject = simVideoStream;
+    simVideoElement.autoplay = true;
+    simVideoElement.playsInline = true;
+  } catch (err) {
+    console.warn("Could not acquire browser webcam for simulation mode:", err);
+  }
+}
+
+function stopSimWebcam() {
+  if (simVideoStream) {
+    try {
+      simVideoStream.getTracks().forEach(track => track.stop());
+    } catch(e) {}
+    simVideoStream = null;
+  }
+  if (simVideoElement) {
+    simVideoElement.srcObject = null;
+    simVideoElement = null;
+  }
+}
+
 // High-tech synthetic canvas generator (runs at ~15 FPS in simulation mode)
 let mockTick = 0;
 function drawMockFrame() {
@@ -44,9 +76,17 @@ function drawMockFrame() {
   canvas.height = 360;
   const ctx = canvas.getContext("2d");
 
-  // 1. Futuristic dark mesh grid background
-  ctx.fillStyle = "#0c0f14";
-  ctx.fillRect(0, 0, 640, 360);
+  // 1. Draw live webcam if running in browser
+  if (simVideoElement && simVideoElement.readyState >= 2) {
+    ctx.drawImage(simVideoElement, 0, 0, 640, 360);
+    // Draw semi-translucent overlay to keep the industrial cyber aesthetic
+    ctx.fillStyle = "rgba(12, 15, 20, 0.45)";
+    ctx.fillRect(0, 0, 640, 360);
+  } else {
+    // Futuristic dark mesh grid background fallback
+    ctx.fillStyle = "#0c0f14";
+    ctx.fillRect(0, 0, 640, 360);
+  }
 
   ctx.strokeStyle = "rgba(0, 255, 136, 0.03)";
   ctx.lineWidth = 1;
@@ -264,6 +304,11 @@ function handleMockEndpoints(endpoint) {
       count: mockDb.filter(v => v.type === t).length
     }));
   } else if (endpoint === "/api/start" || endpoint === "/api/stop") {
+    if (endpoint === "/api/start") {
+      startSimWebcam();
+    } else {
+      stopSimWebcam();
+    }
     payload = { status: endpoint === "/api/start" ? "started" : "stopped" };
   } else if (endpoint === "/api/frame") {
     const simData = drawMockFrame();
