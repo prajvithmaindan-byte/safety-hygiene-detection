@@ -69,7 +69,7 @@ window.hgSimState = {
   noseTouching: false,
   hairTouching: false,
   noGloves: false,
-  autoLoop: true
+  autoLoop: false
 };
 
 function injectSimHud() {
@@ -91,7 +91,7 @@ function injectSimHud() {
       <button class="hud-btn" id="hudBtnGloves" onclick="toggleSimState('noGloves')">NO GLOVES</button>
     </div>
     <div class="hud-footer">
-      <button class="hud-btn-loop" id="hudBtnLoop" onclick="toggleSimLoop()">⟳ AUTO LOOP: ON</button>
+      <button class="hud-btn-loop inactive" id="hudBtnLoop" onclick="toggleSimLoop()">■ MANUAL CONTROL</button>
     </div>
   `;
   container.appendChild(controller);
@@ -353,7 +353,7 @@ function drawMockFrame() {
       noseTouching: false,
       hairTouching: false,
       noGloves: false,
-      autoLoop: true
+      autoLoop: false
     };
   }
 
