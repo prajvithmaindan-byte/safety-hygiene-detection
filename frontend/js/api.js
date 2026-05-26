@@ -60,6 +60,126 @@ function isSimulationMode() {
   return false;
 }
 
+// ============================================================================
+// BROWSER-SIDE LIVE AI DETECTION FOR VERCEL (MEDIAPIPE FACE-MESH & HANDS CDN)
+// ============================================================================
+
+let browserFaceMesh = null;
+let browserHands = null;
+let latestFaceResults = null;
+let latestHandsResults = null;
+let isAiLoading = false;
+
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = src;
+    s.crossOrigin = "anonymous";
+    s.onload = resolve;
+    s.onerror = reject;
+    document.head.appendChild(s);
+  });
+}
+
+async function loadMediaPipe() {
+  if (window.FaceMesh && window.Hands) return;
+  if (isAiLoading) return;
+  isAiLoading = true;
+  console.log("⚡ Loading MediaPipe client-side AI modules in browser...");
+  try {
+    // Load camera utils first, then FaceMesh and Hands CDNs
+    await loadScript("https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js");
+    await loadScript("https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js");
+    console.log("✓ MediaPipe libraries loaded successfully in browser!");
+  } catch (err) {
+    console.error("❌ Failed to load MediaPipe from CDN:", err);
+  } finally {
+    isAiLoading = false;
+  }
+}
+
+function initBrowserAi() {
+  if (typeof FaceMesh === 'undefined' || typeof Hands === 'undefined') {
+    console.warn("MediaPipe libraries not loaded in window yet.");
+    return;
+  }
+  
+  if (!browserFaceMesh) {
+    browserFaceMesh = new FaceMesh({locateFile: (file) => {
+      return `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`;
+    }});
+    browserFaceMesh.setOptions({
+      maxNumFaces: 1,
+      refineLandmarks: false,
+      minDetectionConfidence: 0.5,
+      minTrackingConfidence: 0.5
+    });
+    browserFaceMesh.onResults((results) => {
+      latestFaceResults = results.multiFaceLandmarks ? results.multiFaceLandmarks[0] : null;
+    });
+  }
+
+  if (!browserHands) {
+    browserHands = new Hands({locateFile: (file) => {
+      return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+    }});
+    browserHands.setOptions({
+      maxNumHands: 2,
+      modelComplexity: 1,
+      minDetectionConfidence: 0.5,
+      minTrackingConfidence: 0.5
+    });
+    browserHands.onResults((results) => {
+      latestHandsResults = results.multiHandLandmarks || null;
+    });
+  }
+}
+
+function getFaceWidth(face) {
+  const p1 = face[234];
+  const p2 = face[454];
+  return Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2));
+}
+
+function checkNoseTouchingJs(face, handsList) {
+  const faceWidth = getFaceWidth(face);
+  const nose = face[1]; // nose tip landmark
+  const fingertips = [4, 8, 12, 16, 20];
+  const threshold = 0.08 * faceWidth; // Same calibrated 8% threshold
+
+  for (const hand of handsList) {
+    for (const idx of fingertips) {
+      const lm = hand[idx];
+      const dist = Math.sqrt(Math.pow(lm.x - nose.x, 2) + Math.pow(lm.y - nose.y, 2));
+      if (dist < threshold) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+function checkHairTouchingJs(face, handsList) {
+  const faceWidth = getFaceWidth(face);
+  const fingertips = [4, 8, 12, 16, 20];
+  const hairLandmarks = [10, 338, 297, 332, 284];
+  const threshold = 0.10 * faceWidth; // Same calibrated 10% threshold
+
+  for (const hand of handsList) {
+    for (const idx of fingertips) {
+      const lm = hand[idx];
+      for (const hairIdx of hairLandmarks) {
+        const hairLm = face[hairIdx];
+        const dist = Math.sqrt(Math.pow(lm.x - hairLm.x, 2) + Math.pow(lm.y - hairLm.y, 2));
+        if (dist < threshold) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
 // Browser-based camera stream for simulation mode
 let simVideoStream = null;
 let simVideoElement = null;
@@ -74,6 +194,10 @@ async function startSimWebcam() {
     simVideoElement.srcObject = simVideoStream;
     simVideoElement.autoplay = true;
     simVideoElement.playsInline = true;
+
+    // Dynamically load and initialize MediaPipe for client-side tracking on Vercel
+    await loadMediaPipe();
+    initBrowserAi();
   } catch (err) {
     console.warn("Could not acquire browser webcam for simulation mode:", err);
   }
@@ -102,6 +226,16 @@ function drawMockFrame() {
   const ctx = canvas.getContext("2d");
 
   const isCameraActive = (simVideoElement && simVideoElement.readyState >= 2);
+
+  // Send frames to browser-side MediaPipe AI dynamically
+  if (isCameraActive) {
+    if (browserFaceMesh && mockTick % 4 === 0) {
+      browserFaceMesh.send({image: simVideoElement}).catch(()=>{});
+    }
+    if (browserHands && mockTick % 4 === 2) {
+      browserHands.send({image: simVideoElement}).catch(()=>{});
+    }
+  }
 
   // 1. Draw live webcam if running in browser
   if (isCameraActive) {
@@ -152,13 +286,25 @@ function drawMockFrame() {
     ctx.beginPath(); ctx.moveTo(320, 140); ctx.lineTo(320, 175); ctx.lineTo(305, 180); ctx.strokeStyle = "#00ff88"; ctx.stroke();
   }
 
-  // 3. Simulated states (rotating loop phases)
-  const phase = Math.floor(mockTick / 60) % 5;
+  // 3. Simulated states or Live browser-side AI tracking
   let violations = [];
 
-  // Face shield (only when camera is NOT active)
-  if (phase !== 1) {
-    if (!isCameraActive) {
+  if (isCameraActive) {
+    // RUN REAL-TIME CLIENT-SIDE AI FOR VERCEL LINK!
+    if (latestFaceResults && latestHandsResults) {
+      if (checkNoseTouchingJs(latestFaceResults, latestHandsResults)) {
+        violations.push({ type: "Nose Touching", confidence: 0.93 });
+      }
+      if (checkHairTouchingJs(latestFaceResults, latestHandsResults)) {
+        violations.push({ type: "Hair Touching", confidence: 0.91 });
+      }
+    }
+  } else {
+    // Static offline fallback loop
+    const phase = Math.floor(mockTick / 60) % 5;
+    
+    // Face shield (only when camera is NOT active)
+    if (phase !== 1) {
       ctx.fillStyle = "rgba(0, 170, 255, 0.25)";
       ctx.strokeStyle = "#00aaff";
       ctx.beginPath();
@@ -169,46 +315,42 @@ function drawMockFrame() {
       ctx.fillStyle = "#00aaff";
       ctx.font = "bold 9px Rajdhani, monospace";
       ctx.fillText("SHIELD ACTIVE", faceCX - 30, faceCY + 45);
-    }
-  } else {
-    if (!isCameraActive) {
+    } else {
       // Red bare mouth (Mask breach)
       ctx.strokeStyle = "#ff2d55";
       ctx.beginPath();
       ctx.ellipse(faceCX, faceCY + 28, 18, 8, 0, 0, 2 * Math.PI);
       ctx.stroke();
+      violations.push({ type: "No Mouth Mask", confidence: 0.94 });
     }
-    violations.append ? violations.append({ type: "No Mouth Mask", confidence: 0.94 }) : violations.push({ type: "No Mouth Mask", confidence: 0.94 });
-  }
 
-  // Simulated Hands / Gestures
-  let handX = 520;
-  let handY = 280;
+    // Simulated Hands / Gestures
+    let handX = 520;
+    let handY = 280;
 
-  if (phase === 2) {
-    handX = faceCX - 8;
-    handY = faceCY + 5;
-    violations.push({ type: "Nose Touching", confidence: 0.89 });
-  } else if (phase === 3) {
-    handX = faceCX;
-    handY = faceCY - 70;
-    violations.push({ type: "Hair Touching", confidence: 0.86 });
-  } else if (phase === 4) {
-    handX = 420;
-    handY = 240;
-    if (!isCameraActive) {
+    if (phase === 2) {
+      handX = faceCX - 8;
+      handY = faceCY + 5;
+      violations.push({ type: "Nose Touching", confidence: 0.89 });
+    } else if (phase === 3) {
+      handX = faceCX;
+      handY = faceCY - 70;
+      violations.push({ type: "Hair Touching", confidence: 0.86 });
+    } else if (phase === 4) {
+      handX = 420;
+      handY = 240;
       // Bare hand
       ctx.fillStyle = "#ffaa44";
       ctx.beginPath(); ctx.arc(handX, handY, 18, 0, 2 * Math.PI); ctx.fill();
+      violations.push({ type: "No Hand Gloves", confidence: 0.83 });
     }
-    violations.push({ type: "No Hand Gloves", confidence: 0.83 });
-  }
 
-  if (phase !== 4 && !isCameraActive) {
-    // Render high-tech blue gloves
-    ctx.fillStyle = "rgba(0, 170, 255, 0.4)";
-    ctx.strokeStyle = "#00aaff";
-    ctx.beginPath(); ctx.arc(handX, handY, 18, 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
+    if (phase !== 4) {
+      // Render high-tech blue gloves
+      ctx.fillStyle = "rgba(0, 170, 255, 0.4)";
+      ctx.strokeStyle = "#00aaff";
+      ctx.beginPath(); ctx.arc(handX, handY, 18, 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
+    }
   }
 
   // 4. Matrix Scanning Line
