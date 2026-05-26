@@ -27,6 +27,11 @@ function getApiBase() {
 
 // Check if we should run in simulation mode
 function isSimulationMode() {
+  const mode = localStorage.getItem("hg_mode") || "live";
+  if (mode === "simulation") {
+    return true;
+  }
+
   const isLocal = window.location.hostname === "localhost" || 
                   window.location.hostname === "127.0.0.1" || 
                   window.location.port === "5000";
@@ -34,23 +39,10 @@ function isSimulationMode() {
   const customUrl = localStorage.getItem("hg_backend_url");
 
   // Force simulation mode on remote production hosts (Vercel) if no custom backend is configured
-  if (!isLocal && !customUrl) {
+  if (mode === "live" && !isLocal && !customUrl) {
     return true;
   }
 
-  const storedMode = localStorage.getItem("hg_mode");
-  if (storedMode) {
-    return storedMode === "simulation";
-  }
-
-  if (customUrl) {
-    return false; // If custom backend URL is configured, try to connect to it
-  }
-
-  // Default: if running on secure HTTPS, default to simulation mode
-  if (window.location.protocol === "https:") {
-    return true;
-  }
   return false;
 }
 
@@ -440,9 +432,7 @@ function updateConnectionIndicator() {
   const badge = document.getElementById("apiStatusBadge");
   if (!badge) return;
 
-  const mode = localStorage.getItem("hg_mode") || "live";
-
-  if (mode === "simulation") {
+  if (isSimulationMode()) {
     badge.innerText = "⬡ SIMULATION ACTIVE";
     badge.style.background = "rgba(255, 170, 0, 0.12)";
     badge.style.color = "#ffaa44";
