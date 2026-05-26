@@ -13,8 +13,9 @@ face_mesh = mp_face_mesh.FaceMesh(
 )
 hands_detector = mp_hands.Hands(
     max_num_hands=2,
-    min_detection_confidence=0.75,
-    min_tracking_confidence=0.75
+    min_detection_confidence=0.50,
+    min_tracking_confidence=0.50,
+    model_complexity=1
 )
 
 # ─── MASK DETECTION ────────────────────────────────────────────────
@@ -89,36 +90,31 @@ NOSE_BRIDGE_LANDMARKS = [1, 2, 4, 5, 6, 19, 20, 94, 195, 197]
 
 def check_nose_touching(face_landmarks, hand_landmarks_list, frame_h, frame_w):
     """
-    Returns True only if 2 or more hand fingertips are within tight proximity of nose tip.
-    Uses nose tip (landmark 4) as anchor. Distance threshold is relative to face size.
+    Returns True if 1 or more fingertips are within the scale-invariant proximity threshold of the nose tip.
+    Uses nose tip (landmark 4) as anchor.
     """
     # Nose tip position
     nose = face_landmarks.landmark[NOSE_TIP]
     nx = nose.x * frame_w
     ny = nose.y * frame_h
 
-    # Face scale reference: distance from nose to chin
-    chin = face_landmarks.landmark[152]
-    chin_y = chin.y * frame_h
-    face_scale = abs(chin_y - ny)
+    # Face scale reference: face width (distance between landmarks 234 and 454)
+    left_x = face_landmarks.landmark[234].x * frame_w
+    right_x = face_landmarks.landmark[454].x * frame_w
+    face_width = abs(right_x - left_x)
 
-    # Threshold: 12% of nose-to-chin distance
-    threshold = face_scale * 0.12
-    threshold = max(threshold, 20)  # minimum 20px
+    # Proximity threshold: 22% of face width (highly robust and standard)
+    threshold = face_width * 0.22
 
-    touch_count = 0
+    FINGERTIPS = [4, 8, 12, 16, 20]
     for hand in hand_landmarks_list:
-        # Check fingertip landmarks only (index, middle, ring, pinky, thumb tips)
-        FINGERTIPS = [4, 8, 12, 16, 20]
         for tip_idx in FINGERTIPS:
             lm = hand.landmark[tip_idx]
             hx = lm.x * frame_w
             hy = lm.y * frame_h
             dist = np.sqrt((hx - nx)**2 + (hy - ny)**2)
             if dist < threshold:
-                touch_count += 1
-                if touch_count >= 2:
-                    return True  # Confirmed nose touch (requires at least 2 fingertips)
+                return True  # Responsive single-finger nose touch confirmation
     return False
 
 
@@ -138,10 +134,10 @@ def check_hair_touching(face_landmarks, hand_landmarks_list, frame_h, frame_w):
     left_x = face_landmarks.landmark[234].x * frame_w
     right_x = face_landmarks.landmark[454].x * frame_w
     face_width = abs(right_x - left_x)
-    margin = face_width * 0.3  # 30% margin on each side
+    margin = face_width * 0.4  # Widen search horizontal margin to 40% to catch side hair touches
     
     # Scale-invariant vertical tolerance (allows touching upper forehead/hairline)
-    tolerance = face_width * 0.10
+    tolerance = face_width * 0.15
 
     FINGERTIPS = [4, 8, 12, 16, 20]
     hair_touch_count = 0
@@ -152,7 +148,7 @@ def check_hair_touching(face_landmarks, hand_landmarks_list, frame_h, frame_w):
             hx = lm.x * frame_w
             hy = lm.y * frame_h
 
-            # Hand must be ABOVE the forehead boundary (with small vertical tolerance)
+            # Hand must be ABOVE the forehead boundary (with vertical tolerance)
             # and horizontally within the width of the face plus margin
             above_forehead = hy < (forehead_y + tolerance)
             within_face_width = (left_x - margin) < hx < (right_x + margin)

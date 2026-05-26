@@ -21,18 +21,48 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 body {
-  background: var(--bg-primary);
+  background: transparent;
   color: var(--text);
   font-family: var(--font-body);
   min-height: 100vh;
-  background-image: 
-    radial-gradient(circle at 10% 20%, rgba(255, 0, 127, 0.08) 0%, transparent 40%),
-    radial-gradient(circle at 90% 80%, rgba(0, 242, 254, 0.08) 0%, transparent 40%),
-    linear-gradient(rgba(5, 2, 18, 0.88), rgba(5, 2, 18, 0.88)),
-    url('https://static.vecteezy.com/system/resources/thumbnails/006/970/661/small/futuristic-gaming-background-in-livestream-free-vector.jpg');
-  background-size: cover;
-  background-position: center;
-  background-attachment: fixed;
+}
+
+/* Full Screen Dynamic Video Background styling */
+.video-bg-container {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: -2;
+  overflow: hidden;
+  background: #050212;
+}
+
+.video-bg {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  min-width: 100%;
+  min-height: 100%;
+  width: auto;
+  height: auto;
+  transform: translate(-50%, -50%);
+  object-fit: cover;
+  opacity: 0.16; /* Subtle backdrop blend to maximize text contrast */
+  mix-blend-mode: screen;
+  filter: saturate(1.4) brightness(0.9);
+  transition: opacity 1s ease;
+}
+
+.video-bg-overlay {
+  position: absolute;
+  inset: 0;
+  background: 
+    radial-gradient(circle at 10% 20%, rgba(255, 0, 127, 0.06) 0%, transparent 45%),
+    radial-gradient(circle at 90% 80%, rgba(0, 242, 254, 0.06) 0%, transparent 45%),
+    linear-gradient(180deg, rgba(5, 2, 18, 0.86) 0%, rgba(8, 4, 25, 0.94) 100%);
+  z-index: -1;
 }
 
 /* NAV */

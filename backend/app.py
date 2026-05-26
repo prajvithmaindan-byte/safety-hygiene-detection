@@ -490,6 +490,15 @@ def serve_js(path):
         return "JS not found", 404
 
 
+@app.route('/assets/<path:path>')
+def serve_assets(path):
+    try:
+        return send_from_directory(os.path.join(FRONTEND_DIR, 'assets'), path)
+    except Exception as e:
+        logger.error(f"[API] Serve Assets error: {e}")
+        return "Asset not found", 404
+
+
 @app.route('/api/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
