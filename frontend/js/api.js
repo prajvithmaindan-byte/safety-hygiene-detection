@@ -32,7 +32,32 @@ function getApiBase() {
 
 // Check if we should run in simulation mode
 function isSimulationMode() {
-  return localStorage.getItem("hg_mode") === "simulation";
+  const isLocal = window.location.hostname === "localhost" || 
+                  window.location.hostname === "127.0.0.1" || 
+                  window.location.port === "5000";
+  
+  const customUrl = localStorage.getItem("hg_backend_url");
+
+  // Force simulation mode on remote production hosts (Vercel) if no custom backend is configured
+  // This bypasses any stale local storage hg_mode values from previous sessions
+  if (!isLocal && !customUrl) {
+    return true;
+  }
+
+  const storedMode = localStorage.getItem("hg_mode");
+  if (storedMode) {
+    return storedMode === "simulation";
+  }
+
+  if (customUrl) {
+    return false; // If custom backend URL is configured, try to connect to it
+  }
+
+  // Default: if running on secure HTTPS, default to simulation mode
+  if (window.location.protocol === "https:") {
+    return true;
+  }
+  return false;
 }
 
 // Browser-based camera stream for simulation mode
@@ -242,33 +267,13 @@ function logSimulatedViolation(violations) {
 
 // High-performance custom fetch wrapper supporting automatic mock simulation
 async function smartFetch(endpoint, options = {}) {
-  const base = getApiBase();
-  const fullUrl = base + endpoint;
-
-  // Always attempt to ping the live backend first when starting the camera stream
-  // to dynamically recover if the local Python server is now running!
-  if (endpoint === "/api/start") {
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 2000); // 2 second timeout
-      const response = await window.fetch(fullUrl, { ...options, signal: controller.signal });
-      clearTimeout(timeoutId);
-      if (response.ok) {
-        localStorage.setItem("hg_mode", "live");
-        updateConnectionIndicator();
-        return response;
-      }
-    } catch (e) {
-      console.warn("Live backend check failed during start. Falling back to Simulation Mode.", e);
-      localStorage.setItem("hg_mode", "simulation");
-      updateConnectionIndicator();
-    }
-  }
-
   // If we already know we are in simulation, directly use mock values
   if (isSimulationMode()) {
     return handleMockEndpoints(endpoint);
   }
+
+  const base = getApiBase();
+  const fullUrl = base + endpoint;
 
   try {
     const controller = new AbortController();
