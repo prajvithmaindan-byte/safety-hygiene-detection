@@ -83,8 +83,8 @@ def check_nose_touching(face_landmarks, hand_landmarks, frame_h, frame_w):
     # Fingertip indices in MediaPipe Hands: Thumb(4), Index(8), Middle(12), Ring(16), Pinky(20)
     fingertips = [4, 8, 12, 16, 20]
     
-    # Scale-invariant proximity threshold (8% of face width for high accuracy)
-    threshold = 0.08 * face_width
+    # Scale-invariant proximity threshold (Tightened to 5% of face width for high accuracy)
+    threshold = 0.05 * face_width
     
     for hand in hand_landmarks:
         for idx in fingertips:
@@ -92,6 +92,7 @@ def check_nose_touching(face_landmarks, hand_landmarks, frame_h, frame_w):
             hx, hy = lm.x * frame_w, lm.y * frame_h
             dist = np.sqrt((hx - nx)**2 + (hy - ny)**2)
             if dist < threshold:
+                print(f"[AI Debug] Nose Touch Detected! Dist: {dist:.1f}px, Threshold: {threshold:.1f}px (Fingertip index: {idx})")
                 return True
     return False
 
@@ -105,8 +106,8 @@ def check_hair_touching(face_landmarks, hand_landmarks, frame_h, frame_w):
     # Forehead / hairline landmarks
     hair_landmarks = [10, 338, 297, 332, 284]
     
-    # Scale-invariant proximity threshold (10% of face width for high accuracy)
-    threshold = 0.10 * face_width
+    # Scale-invariant proximity threshold (Tightened to 6% of face width for high accuracy)
+    threshold = 0.06 * face_width
     
     for hand in hand_landmarks:
         for idx in fingertips:
@@ -119,6 +120,7 @@ def check_hair_touching(face_landmarks, hand_landmarks, frame_h, frame_w):
                 hair_x, hair_y = hair_lm.x * frame_w, hair_lm.y * frame_h
                 dist = np.sqrt((hx - hair_x)**2 + (hy - hair_y)**2)
                 if dist < threshold:
+                    print(f"[AI Debug] Hair Touch Detected! Dist: {dist:.1f}px, Threshold: {threshold:.1f}px (Forehead index: {hair_idx}, Fingertip index: {idx})")
                     return True
     return False
 
