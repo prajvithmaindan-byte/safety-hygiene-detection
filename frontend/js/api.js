@@ -84,9 +84,6 @@ function injectSimHud() {
       <button class="hud-btn" id="hudBtnHair" onclick="toggleSimState('hairTouching')">HAIR TOUCH</button>
       <button class="hud-btn" id="hudBtnGloves" onclick="toggleSimState('noGloves')">NO GLOVES</button>
     </div>
-    <div class="hud-footer">
-      <button class="hud-btn-loop inactive" id="hudBtnLoop" onclick="toggleSimLoop()">■ MANUAL CONTROL</button>
-    </div>
   `;
   container.appendChild(controller);
   
@@ -195,11 +192,6 @@ function removeSimHud() {
 }
 
 window.toggleSimState = function(key) {
-  // If auto loop is on, turn it off first
-  if (window.hgSimState.autoLoop) {
-    window.toggleSimLoop();
-  }
-  
   window.hgSimState[key] = !window.hgSimState[key];
   
   // Update button active state
@@ -216,34 +208,6 @@ window.toggleSimState = function(key) {
       btn.classList.add("active");
     } else {
       btn.classList.remove("active");
-    }
-  }
-};
-
-window.toggleSimLoop = function() {
-  window.hgSimState.autoLoop = !window.hgSimState.autoLoop;
-  const loopBtn = document.getElementById("hudBtnLoop");
-  if (loopBtn) {
-    if (window.hgSimState.autoLoop) {
-      loopBtn.innerText = "⟳ AUTO LOOP: ON";
-      loopBtn.classList.remove("inactive");
-      
-      // Reset all individual states
-      const keys = ["maskUnderNose", "noseTouching", "hairTouching", "noGloves"];
-      keys.forEach(k => {
-        window.hgSimState[k] = false;
-        const btnMap = {
-          maskUnderNose: "hudBtnMask",
-          noseTouching: "hudBtnNose",
-          hairTouching: "hudBtnHair",
-          noGloves: "hudBtnGloves"
-        };
-        const btn = document.getElementById(btnMap[k]);
-        if (btn) btn.classList.remove("active");
-      });
-    } else {
-      loopBtn.innerText = "■ MANUAL CONTROL";
-      loopBtn.classList.add("inactive");
     }
   }
 };
@@ -362,32 +326,18 @@ function drawMockFrame() {
   let violations = [];
 
   if (isCameraActive) {
-    if (window.hgSimState.autoLoop) {
-      // Loop phases automatically every 2 seconds
-      const phase = Math.floor(mockTick / 60) % 5;
-      if (phase === 1) {
-        violations.push({ type: "No Mouth Mask", confidence: 0.94 });
-      } else if (phase === 2) {
-        violations.push({ type: "Nose Touching", confidence: 0.89 });
-      } else if (phase === 3) {
-        violations.push({ type: "Hair Touching", confidence: 0.86 });
-      } else if (phase === 4) {
-        violations.push({ type: "No Hand Gloves", confidence: 0.83 });
-      }
-    } else {
-      // Use manual floating HUD controls
-      if (window.hgSimState.maskUnderNose) {
-        violations.push({ type: "No Mouth Mask", confidence: 0.94 });
-      }
-      if (window.hgSimState.noseTouching) {
-        violations.push({ type: "Nose Touching", confidence: 0.89 });
-      }
-      if (window.hgSimState.hairTouching) {
-        violations.push({ type: "Hair Touching", confidence: 0.86 });
-      }
-      if (window.hgSimState.noGloves) {
-        violations.push({ type: "No Hand Gloves", confidence: 0.83 });
-      }
+    // Use manual floating HUD controls only
+    if (window.hgSimState.maskUnderNose) {
+      violations.push({ type: "No Mouth Mask", confidence: 0.94 });
+    }
+    if (window.hgSimState.noseTouching) {
+      violations.push({ type: "Nose Touching", confidence: 0.89 });
+    }
+    if (window.hgSimState.hairTouching) {
+      violations.push({ type: "Hair Touching", confidence: 0.86 });
+    }
+    if (window.hgSimState.noGloves) {
+      violations.push({ type: "No Hand Gloves", confidence: 0.83 });
     }
   } else {
     // Static offline fallback loop
