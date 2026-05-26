@@ -3,15 +3,10 @@
  * Provides seamless switching between Live Local Python Backend and fully simulated Client-Side environment.
  */
 
-const DEFAULT_MOCK_VIOLATIONS = [
-  { id: 101, type: "No Mouth Mask", timestamp: "2026-05-26 10:15:32", confidence: 0.94, image: null },
-  { id: 102, type: "Nose Touching", timestamp: "2026-05-26 11:22:04", confidence: 0.88, image: null },
-  { id: 103, type: "No Hand Gloves", timestamp: "2026-05-26 12:45:19", confidence: 0.91, image: null },
-  { id: 104, type: "Hair Touching", timestamp: "2026-05-26 14:02:11", confidence: 0.85, image: null },
-  { id: 105, type: "No Mouth Mask", timestamp: "2026-05-26 15:30:45", confidence: 0.96, image: null }
-];
+const DEFAULT_MOCK_VIOLATIONS = [];
 
-// Initialize local mock store
+// Force clear local storage mock violations to start completely fresh from beginning
+localStorage.removeItem("hg_mock_violations");
 if (!localStorage.getItem("hg_mock_violations")) {
   localStorage.setItem("hg_mock_violations", JSON.stringify(DEFAULT_MOCK_VIOLATIONS));
 }
