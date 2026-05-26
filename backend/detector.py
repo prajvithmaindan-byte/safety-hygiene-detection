@@ -147,9 +147,19 @@ def check_gloves(hand_landmarks, frame, frame_h, frame_w):
                 return False
     return True
 
+# Temporal hysteresis filter state to stabilize alerts and filter out transient movements/noise
+consecutive_frames = {
+    "Mask Under Nose": 0,
+    "Nose Touching": 0,
+    "Hair Touching": 0,
+    "No Hand Gloves": 0
+}
+
+# Require 8 consecutive frames (~250ms at 30fps) of sustained detection to trigger a real alert
+TRIGGER_FRAME_THRESHOLD = 8
+
 def analyze_frame(frame):
-    """Main analysis function — returns list of violations"""
-    violations = []
+    """Main analysis function — returns list of violations with advanced temporal filtering"""
     h, w = frame.shape[:2]
     
     # Downscale image to 640x360 to significantly boost inference speed
@@ -162,28 +172,44 @@ def analyze_frame(frame):
     
     hand_landmarks_list = hand_results.multi_hand_landmarks or []
     
+    # 1. Evaluate raw instantaneous detections
+    has_mask_violation = False
+    has_nose_touch = False
+    has_hair_touch = False
+    has_gloves_violation = False
+    
     if face_results.multi_face_landmarks:
         for face in face_results.multi_face_landmarks:
             mask_violation = check_mask(face, frame, h, w)
             if mask_violation == "Mask Under Nose":
-                violations.append({"type": "Mask Under Nose", "confidence": 0.89})
+                has_mask_violation = True
             
             if hand_landmarks_list:
                 if check_nose_touching(face, hand_landmarks_list, h, w):
-                    violations.append({"type": "Nose Touching", "confidence": 0.88})
+                    has_nose_touch = True
                 if check_hair_touching(face, hand_landmarks_list, h, w):
-                    violations.append({"type": "Hair Touching", "confidence": 0.85})
+                    has_hair_touch = True
     
     if hand_landmarks_list:
         if not check_gloves(hand_landmarks_list, frame, h, w):
-            violations.append({"type": "No Hand Gloves", "confidence": 0.82})
-    
-    # De-duplicate violations by type to prevent multiple identical alerts (e.g. from multiple faces)
-    unique_violations = []
-    seen = set()
-    for v in violations:
-        if v["type"] not in seen:
-            seen.add(v["type"])
-            unique_violations.append(v)
+            has_gloves_violation = True
             
-    return unique_violations
+    # 2. Update temporal counters and compile filtered violations
+    active_violations = []
+    
+    def process_counter(vtype, is_active, confidence):
+        if is_active:
+            consecutive_frames[vtype] += 1
+            if consecutive_frames[vtype] >= TRIGGER_FRAME_THRESHOLD:
+                consecutive_frames[vtype] = TRIGGER_FRAME_THRESHOLD # Cap the counter
+                active_violations.append({"type": vtype, "confidence": confidence})
+        else:
+            # Cool down: decrement counter rapidly (e.g. by 2) when clear, to allow fast recover but filter out single-frame drops
+            consecutive_frames[vtype] = max(0, consecutive_frames[vtype] - 2)
+            
+    process_counter("Mask Under Nose", has_mask_violation, 0.89)
+    process_counter("Nose Touching", has_nose_touch, 0.88)
+    process_counter("Hair Touching", has_hair_touch, 0.85)
+    process_counter("No Hand Gloves", has_gloves_violation, 0.82)
+    
+    return active_violations
