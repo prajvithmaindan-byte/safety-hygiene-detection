@@ -1,7 +1,9 @@
 flask
 flask-cors
 flask-socketio
-opencv-python
+opencv-python-headless
 mediapipe
 numpy
 pillow
+gunicorn
+eventlet
