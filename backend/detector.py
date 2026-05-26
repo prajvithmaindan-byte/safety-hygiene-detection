@@ -127,19 +127,21 @@ FOREHEAD_LANDMARKS = [10, 67, 109, 338, 297]  # Top of head region
 
 def check_hair_touching(face_landmarks, hand_landmarks_list, frame_h, frame_w):
     """
-    Returns True only if 3 or more fingertips are ABOVE the forehead line by at least 30px.
-    Uses forehead landmark y as the upper boundary.
-    Hand must be clearly in the hair/scalp zone.
+    Returns True if 1 or more fingertips are in the hair/scalp zone.
+    Uses forehead landmark y with a scale-invariant threshold as the boundary.
     """
     # Average forehead y position
     forehead_ys = [face_landmarks.landmark[i].y * frame_h for i in FOREHEAD_LANDMARKS]
     forehead_y = np.mean(forehead_ys)
 
-    # Face width for horizontal bounding
+    # Face width for scale-invariant thresholds
     left_x = face_landmarks.landmark[234].x * frame_w
     right_x = face_landmarks.landmark[454].x * frame_w
     face_width = abs(right_x - left_x)
     margin = face_width * 0.3  # 30% margin on each side
+    
+    # Scale-invariant vertical tolerance (allows touching upper forehead/hairline)
+    tolerance = face_width * 0.10
 
     FINGERTIPS = [4, 8, 12, 16, 20]
     hair_touch_count = 0
@@ -150,15 +152,15 @@ def check_hair_touching(face_landmarks, hand_landmarks_list, frame_h, frame_w):
             hx = lm.x * frame_w
             hy = lm.y * frame_h
 
-            # Must be ABOVE forehead (lower y value) — strictly in hair zone (at least 30px above forehead)
-            # Must be horizontally within face width + margin
-            above_forehead = hy < (forehead_y - 30)  # 30px above forehead
+            # Hand must be ABOVE the forehead boundary (with small vertical tolerance)
+            # and horizontally within the width of the face plus margin
+            above_forehead = hy < (forehead_y + tolerance)
             within_face_width = (left_x - margin) < hx < (right_x + margin)
 
             if above_forehead and within_face_width:
                 hair_touch_count += 1
-                if hair_touch_count >= 3:
-                    return True
+                if hair_touch_count >= 1:
+                    return True  # Responsive single-finger hair touch confirmation
     return False
 
 
