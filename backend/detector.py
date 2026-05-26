@@ -23,32 +23,62 @@ MOUTH_LANDMARKS = [61, 291, 0, 17, 269, 270, 409, 291, 375, 321, 405, 314]
 UPPER_LIP = [13, 312, 311, 310, 415, 308]
 LOWER_LIP = [14, 317, 402, 318, 324, 308]
 
-def check_mask(face_landmarks, frame_h, frame_w):
+def check_mask(face_landmarks, frame, frame_h, frame_w):
     """
-    Returns True if NO mask detected (violation).
-    Logic: measure vertical mouth openness + lip landmark visibility.
-    A real mask physically covers mouth → landmarks compress AND skin color changes.
+    Returns True if NO mask is worn (violation).
+    Returns False if mask IS worn (safe).
+    
+    Logic: Samples a bounding box around the mouth region.
+    If the majority of the mouth region contains skin colors, no mask is worn.
+    If skin color ratio is low, it indicates a mask is covering the mouth.
     """
-    # Get upper and lower lip y-positions
-    upper_y = np.mean([face_landmarks.landmark[i].y * frame_h for i in UPPER_LIP])
-    lower_y = np.mean([face_landmarks.landmark[i].y * frame_h for i in LOWER_LIP])
-    mouth_vertical_span = abs(lower_y - upper_y)
-
-    # Get nose tip and chin for face scale reference
-    nose_y = face_landmarks.landmark[1].y * frame_h
-    chin_y = face_landmarks.landmark[152].y * frame_h
-    face_height = abs(chin_y - nose_y)
-
-    if face_height < 1:
-        return False  # Can't determine, skip
-
-    # Mouth span relative to face height
-    ratio = mouth_vertical_span / face_height
-
-    # If mouth span is > 15% of face height → lips clearly visible → no mask
-    # Masked faces compress this to near 0–6%
-    no_mask = ratio > 0.15
-    return no_mask  # True = violation (no mask worn)
+    # Mouth center landmark (0 or 13)
+    lm_mouth = face_landmarks.landmark[13]
+    cx = int(lm_mouth.x * frame_w)
+    cy = int(lm_mouth.y * frame_h)
+    
+    # Face width for reference size
+    left_x = face_landmarks.landmark[234].x * frame_w
+    right_x = face_landmarks.landmark[454].x * frame_w
+    face_width = abs(right_x - left_x)
+    
+    # Define ROI size around mouth based on face width
+    rw = int(face_width * 0.22)
+    rh = int(face_width * 0.12)
+    
+    # Bounds check
+    min_x = max(0, cx - rw)
+    max_x = min(frame_w - 1, cx + rw)
+    min_y = max(0, cy - rh)
+    max_y = min(frame_h - 1, cy + rh)
+    
+    if (max_x - min_x) < 5 or (max_y - min_y) < 5:
+        return False  # Uncertain, skip
+        
+    mouth_roi = frame[min_y:max_y+1, min_x:max_x+1]
+    if mouth_roi.size == 0:
+        return False
+        
+    # Convert to HSV
+    hsv = cv2.cvtColor(mouth_roi, cv2.COLOR_BGR2HSV)
+    
+    # Dual skin tone HSV thresholds (covers diverse skin tones)
+    lower1 = np.array([0, 20, 60])
+    upper1 = np.array([20, 180, 255])
+    lower2 = np.array([160, 20, 60])
+    upper2 = np.array([180, 180, 255])
+    
+    mask1 = cv2.inRange(hsv, lower1, upper1)
+    mask2 = cv2.inRange(hsv, lower2, upper2)
+    combined = cv2.bitwise_or(mask1, mask2)
+    
+    skin_ratio = np.sum(combined > 0) / combined.size
+    
+    # If skin ratio is high (> 20%), skin is exposed -> NO mask (True = violation)
+    # If skin ratio is low (< 20%), mouth is covered by a mask -> Mask worn (False = safe)
+    # Using 0.20 as a robust divider since the lips, cheek, and chin in this area are very dominant skin regions
+    no_mask = skin_ratio > 0.20
+    return no_mask
 
 
 # ─── NOSE TOUCH DETECTION ─────────────────────────────────────────
@@ -239,7 +269,7 @@ def analyze_frame(frame):
         for face in face_results.multi_face_landmarks:
 
             # MASK CHECK
-            if check_mask(face, h, w):
+            if check_mask(face, frame, h, w):
                 violations.append({"type": "No Mouth Mask", "confidence": 0.91})
 
             # NOSE TOUCH — only if hands are present
