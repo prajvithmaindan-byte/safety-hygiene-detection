@@ -5,8 +5,7 @@
 
 const DEFAULT_MOCK_VIOLATIONS = [];
 
-// Force clear local storage mock violations to start completely fresh from beginning
-localStorage.removeItem("hg_mock_violations");
+// Initialize local storage mock violations if not present
 if (!localStorage.getItem("hg_mock_violations")) {
   localStorage.setItem("hg_mock_violations", JSON.stringify(DEFAULT_MOCK_VIOLATIONS));
 }
