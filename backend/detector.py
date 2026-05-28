@@ -4,7 +4,7 @@ import numpy as np
 
 mp_face_mesh = mp.solutions.face_mesh
 mp_hands = mp.solutions.hands
-mp_face_detection = mp.solutions.face_detection
+
 
 face_mesh = mp_face_mesh.FaceMesh(
     max_num_faces=5,
