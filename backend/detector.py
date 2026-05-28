@@ -1,5 +1,5 @@
-import cv2
 import mediapipe as mp
+import cv2
 import numpy as np
 
 mp_face_mesh = mp.solutions.face_mesh
