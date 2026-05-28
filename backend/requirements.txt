@@ -7,3 +7,5 @@ numpy
 pillow
 gunicorn
 eventlet
+streamlit
+streamlit-webrtc
