@@ -1,12 +1,13 @@
-import mediapipe as mp
 import cv2
+import mediapipe as mp
 import numpy as np
 
-mp_face_mesh = mp.solutions.face_mesh
+# Use the exact correct solution path for FaceMesh
+mp_face_mesh = mp.solutions.face_mesh.FaceMesh
 mp_hands = mp.solutions.hands
 
 
-face_mesh = mp_face_mesh.FaceMesh(
+face_mesh = mp_face_mesh(
     max_num_faces=5,
     min_detection_confidence=0.7,
     min_tracking_confidence=0.7
