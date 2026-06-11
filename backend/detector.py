@@ -8,16 +8,18 @@ mp_hands = mp.solutions.hands
 
 
 face_mesh = mp_face_mesh(
-    max_num_faces=5,
-    min_detection_confidence=0.7,
-    min_tracking_confidence=0.7
+    max_num_faces=10,
+    min_detection_confidence=0.4,
+    min_tracking_confidence=0.4,
+    refine_landmarks=False
 )
 hands_detector = mp_hands.Hands(
-    max_num_hands=2,
-    min_detection_confidence=0.50,
-    min_tracking_confidence=0.50,
-    model_complexity=1
+    max_num_hands=10,
+    min_detection_confidence=0.4,
+    min_tracking_confidence=0.4,
+    model_complexity=0
 )
+hands = hands_detector
 
 # ─── MASK DETECTION ────────────────────────────────────────────────
 # Uses mouth landmark spread AND lip visibility to confirm no mask
@@ -255,9 +257,13 @@ def stabilize_violations(new_violations):
 # ─── MAIN ANALYSIS ────────────────────────────────────────────────
 def analyze_frame(frame):
     """
-    Main entry point. Returns stable, confirmed violations only.
+    Main entry point. Returns per-person violations with structure:
+    {
+        "total_persons": int,
+        "persons": [{"id": int, "violations": [str], "status": str}, ...],
+        "violations": [{"type": str, "confidence": float}, ...]  # flat list for backward compat
+    }
     """
-    violations = []
     h, w = frame.shape[:2]
     rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
@@ -266,26 +272,102 @@ def analyze_frame(frame):
 
     hand_landmarks_list = hand_results.multi_hand_landmarks or []
 
+    all_violations = []  # flat list for backward compatibility
+    persons = []         # per-person breakdown
+
     if face_results.multi_face_landmarks:
-        for face in face_results.multi_face_landmarks:
+        for face_idx, face in enumerate(face_results.multi_face_landmarks):
+            person_id = face_idx + 1
+            person_violations = []
+
+            # Calculate face bbox with minor shoulder/head padding
+            xs = [lm.x for lm in face.landmark]
+            ys = [lm.y for lm in face.landmark]
+            x1 = int(max(0, min(xs) * w))
+            y1 = int(max(0, min(ys) * h))
+            x2 = int(min(w - 1, max(xs) * w))
+            y2 = int(min(h - 1, max(ys) * h))
+            
+            pad_x = int((x2 - x1) * 0.15)
+            pad_y = int((y2 - y1) * 0.20)
+            x1 = max(0, x1 - pad_x)
+            y1 = max(0, y1 - pad_y)
+            x2 = min(w - 1, x2 + pad_x)
+            y2 = min(h - 1, y2 + pad_y)
+            bbox = [x1, y1, x2, y2]
 
             # MASK CHECK
             if check_mask(face, frame, h, w):
-                violations.append({"type": "No Mouth Mask", "confidence": 0.91})
+                person_violations.append("No Mouth Mask")
+                all_violations.append({"type": "No Mouth Mask", "confidence": 0.91})
 
             # NOSE TOUCH — only if hands are present
             if hand_landmarks_list:
                 if check_nose_touching(face, hand_landmarks_list, h, w):
-                    violations.append({"type": "Nose Touching", "confidence": 0.88})
+                    person_violations.append("Nose Touching")
+                    all_violations.append({"type": "Nose Touching", "confidence": 0.88})
 
                 # HAIR TOUCH — only if hands are present
                 if check_hair_touching(face, hand_landmarks_list, h, w):
-                    violations.append({"type": "Hair Touching", "confidence": 0.85})
+                    person_violations.append("Hair Touching")
+                    all_violations.append({"type": "Hair Touching", "confidence": 0.85})
 
-    # GLOVES CHECK — only if hands are visible
+            persons.append({
+                "id": person_id,
+                "bbox": bbox,
+                "violations": person_violations,
+                "status": "VIOLATION" if person_violations else "CLEAR"
+            })
+
+    # GLOVES CHECK — only if hands are visible (applies globally, not per-face)
     if hand_landmarks_list:
         if not check_gloves(hand_landmarks_list, frame, h, w):
-            violations.append({"type": "No Hand Gloves", "confidence": 0.82})
+            all_violations.append({"type": "No Hand Gloves", "confidence": 0.82})
+            # Assign glove violation to person 1 if persons exist, else create a person entry
+            if persons:
+                persons[0]["violations"].append("No Hand Gloves")
+                persons[0]["status"] = "VIOLATION"
+                if "bbox" not in persons[0]:
+                    hand = hand_landmarks_list[0]
+                    h_xs = [lm.x for lm in hand.landmark]
+                    h_ys = [lm.y for lm in hand.landmark]
+                    hx1 = int(max(0, min(h_xs) * w))
+                    hy1 = int(max(0, min(h_ys) * h))
+                    hx2 = int(min(w - 1, max(h_xs) * w))
+                    hy2 = int(min(h - 1, max(h_ys) * h))
+                    persons[0]["bbox"] = [hx1, hy1, hx2, hy2]
+            else:
+                hand = hand_landmarks_list[0]
+                h_xs = [lm.x for lm in hand.landmark]
+                h_ys = [lm.y for lm in hand.landmark]
+                hx1 = int(max(0, min(h_xs) * w))
+                hy1 = int(max(0, min(h_ys) * h))
+                hx2 = int(min(w - 1, max(h_xs) * w))
+                hy2 = int(min(h - 1, max(h_ys) * h))
+                persons.append({
+                    "id": 1,
+                    "bbox": [hx1, hy1, hx2, hy2],
+                    "violations": ["No Hand Gloves"],
+                    "status": "VIOLATION"
+                })
 
-    # Run through stability filter
-    return stabilize_violations(violations)
+    # Run flat violations through stability filter
+    stable_violations = stabilize_violations(all_violations)
+
+    # Filter persons to only include stable violations
+    stable_types = {v["type"] for v in stable_violations}
+    stable_persons = []
+    for p in persons:
+        stable_p_violations = [v for v in p["violations"] if v in stable_types]
+        stable_persons.append({
+            "id": p["id"],
+            "bbox": p.get("bbox"),
+            "violations": stable_p_violations,
+            "status": "VIOLATION" if stable_p_violations else "CLEAR"
+        })
+
+    return {
+        "total_persons": len(stable_persons),
+        "persons": stable_persons,
+        "violations": stable_violations
+    }

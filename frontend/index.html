@@ -43,6 +43,7 @@
     <div class="audio-bar" id="audioBar">
       <span></span><span></span><span></span><span></span><span></span>
     </div>
+    <button id="muteBtn" onclick="toggleMute()" style="font-family:Orbitron; font-size:0.7rem; letter-spacing:2px; padding:0.5rem 1rem; border-radius:6px; border:1px solid #ffd700; background:rgba(255,215,0,0.1); color:#ffd700; cursor:pointer; font-weight:700;">🔊 SOUND ON</button>
     <div>
       <button class="btn btn-green" id="startBtn" onclick="startCamera()">▶ START</button>
       <button class="btn btn-red" id="stopBtn" onclick="stopCamera()" style="display:none">■ STOP</button>
@@ -72,16 +73,27 @@
 
   <!-- ACTIVE VIOLATIONS SIDEBAR PANEL -->
   <div class="violation-panel-wrapper" style="display:flex; flex-direction:column; gap:1rem;">
-    <div class="card" style="flex:1; display:flex; flex-direction:column; gap:1rem; min-height:400px;">
-      <div style="font-family:var(--font-display); font-size:0.75rem; letter-spacing:2px; color:var(--text-muted); border-bottom:1px solid var(--border); padding-bottom:0.5rem;">
-        ACTIVE VIGILANCE TELEMETRY
-      </div>
-      
-      <div class="violation-panel" id="violationPanel" style="flex:1; overflow-y:auto;">
-        <!-- Dynamic violation alert nodes go here -->
-        <div id="noViolationsPlaceholder" style="height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; color:var(--text-muted); font-size:0.85rem; text-align:center; padding:1.5rem;">
-          <span style="color:var(--green); font-size:1.5rem; margin-bottom:0.5rem;">✓</span>
-          SECURE PERIMETER. NO HYGIENE VIOLATIONS DETECTED.
+    <div class="card" style="flex:1; display:flex; flex-direction:column; gap:0.75rem; min-height:400px;">
+      <div class="violation-panel" id="violationPanel">
+        <div class="panel-header">
+          <span class="panel-title">ACTIVE VIGILANCE TELEMETRY</span>
+        </div>
+
+        <!-- Total persons counter -->
+        <div class="persons-counter">
+          <span class="counter-icon">👥</span>
+          <span class="counter-label">PERSONS DETECTED</span>
+          <span class="counter-number" id="totalPersons">0</span>
+        </div>
+
+        <div class="divider"></div>
+
+        <!-- Per person cards -->
+        <div class="persons-list" id="personsList">
+          <div style="text-align:center; color:var(--text-muted); font-family:var(--font-display); font-size:0.7rem; letter-spacing:2px; padding:1.5rem;">
+            <span style="display:block; font-size:1.5rem; margin-bottom:0.5rem;">⬡</span>
+            AWAITING STREAM INITIALIZATION
+          </div>
         </div>
       </div>
     </div>
@@ -89,7 +101,7 @@
 </div>
 
 <script src="js/intro.js"></script>
-<script src="js/api.js?v=2.0"></script>
-<script src="js/monitor.js?v=2.0"></script>
+<script src="js/api.js?v=3.0"></script>
+<script src="js/monitor.js?v=3.0"></script>
 </body>
 </html>

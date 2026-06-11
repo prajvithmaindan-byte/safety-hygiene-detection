@@ -26,7 +26,7 @@ def run_tests():
     print("[Test 1] Running empty frame detection...")
     violations = analyze_frame(test_frame)
     print(f"[Test 1] Result: {violations}")
-    assert len(violations) == 0, f"Expected 0 violations, got {violations}"
+    assert len(violations["violations"]) == 0, f"Expected 0 violations, got {violations}"
     print("[Test 1] [OK] Neutral frame successfully evaluated as SAFE")
 
     # Test 2: Invalid/corrupt frames should be handled gracefully by calling function

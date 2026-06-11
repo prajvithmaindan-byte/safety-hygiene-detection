@@ -24,12 +24,27 @@
     <a href="dashboard.html" class="active">VIOLATIONS</a>
     <a href="analytics.html">ANALYTICS</a>
   </div>
+  <div id="backendStatus" style="
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-family: Orbitron, monospace;
+    font-size: 0.65rem;
+    letter-spacing: 1px;
+  ">
+    <div id="backendDot" style="
+      width:10px; height:10px;
+      border-radius:50%;
+      background:#6b7a8d;
+    "></div>
+    <span id="backendLabel" style="color:#6b7a8d">CHECKING...</span>
+  </div>
 </nav>
 
 <div class="container">
   <div class="title-header">Historic Violations Telemetry Database</div>
 
-  <!-- FILTERS SYSTEM -->
+  <!-- FILTERS & ACTIONS BAR -->
   <div class="filters-bar">
     <select class="filter-select" id="typeFilter" onchange="filterViolations()">
       <option value="ALL">ALL DETECTIONS</option>
@@ -41,11 +56,16 @@
     
     <select class="filter-select" id="confidenceFilter" onchange="filterViolations()">
       <option value="0">ALL CONFIDENCE LEVELS</option>
-      <option value="0.85">> 85% CONFIDENCE</option>
-      <option value="0.90">> 90% CONFIDENCE</option>
+      <option value="0.85">&gt; 85% CONFIDENCE</option>
+      <option value="0.90">&gt; 90% CONFIDENCE</option>
     </select>
     
     <button class="btn btn-green" onclick="fetchViolations()" style="padding:0.6rem 1.2rem;">⟳ REFRESH</button>
+
+    <div style="flex:1;"></div>
+
+    <button class="btn-delete-selected" id="deleteSelectedBtn" onclick="deleteSelected()" style="display:none;">🗑 DELETE SELECTED</button>
+    <button class="btn-delete-all" onclick="deleteAllViolations()">🗑 CLEAR ALL HISTORY</button>
   </div>
 
   <!-- DATA TABLE -->
@@ -53,16 +73,18 @@
     <table class="violations-table">
       <thead>
         <tr>
+          <th style="width:40px;"><input type="checkbox" class="row-checkbox" id="selectAllCheckbox" onchange="toggleSelectAll(this.checked)" title="Select All"></th>
           <th>ID</th>
           <th>VIOLATION TYPE</th>
           <th>TIMESTAMP RECORDED</th>
           <th>CONFIDENCE</th>
           <th>VISUAL TELEMETRY</th>
+          <th style="width:50px;">DELETE</th>
         </tr>
       </thead>
       <tbody id="violationsTableBody">
         <tr>
-          <td colspan="5" style="text-align:center; color:var(--text-muted); padding:3rem;">
+          <td colspan="7" style="text-align:center; color:var(--text-muted); padding:3rem;">
             LOADING DETECTIONS DATABASE...
           </td>
         </tr>

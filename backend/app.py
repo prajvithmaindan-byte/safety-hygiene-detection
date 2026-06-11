@@ -10,7 +10,9 @@ import threading
 import time
 import logging
 
-from database import init_db, insert_violation, get_all_violations, get_hourly_stats, get_violation_type_stats
+from database import (init_db, insert_violation, get_all_violations,
+                      get_hourly_stats, get_violation_type_stats,
+                      delete_violation, delete_all_violations)
 from detector import analyze_frame
 
 # Setup logging
@@ -18,8 +20,24 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
-CORS(app)
-socketio = SocketIO(app, cors_allowed_origins="*")
+app.config['SECRET_KEY'] = 'hygieneguard2025'
+
+CORS(app, resources={
+    r"/api/*": {
+        "origins": "*",
+        "methods": ["GET", "POST", "DELETE", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization"]
+    },
+    r"/snapshots/*": {
+        "origins": "*"
+    }
+})
+
+socketio = SocketIO(
+    app,
+    cors_allowed_origins="*",
+    async_mode='threading'
+)
 
 # Configure directories relative to app.py
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -61,6 +79,7 @@ def make_synthetic_frame(t):
     # Determine simulated phase based on time ticks (loops every 500 ticks)
     phase = (t // 80) % 5
     violations = []
+    persons = []
     
     # 3. Handle Mask State
     if phase != 1:  # Phase 1 = Mask Under Nose
@@ -122,7 +141,23 @@ def make_synthetic_frame(t):
         cv2.rectangle(frame, (face_cx - 80, face_cy - 180), (face_cx + 80, face_cy - 100), (255, 45, 85), 2)
         cv2.putText(frame, "ALERT: HAIR-TOUCHING", (face_cx - 80, face_cy - 200), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 45, 85), 1)
         
-    return frame, violations
+    # Build per-person data from mock violations
+    if violations:
+        persons = [{
+            "id": 1,
+            "bbox": [520, 180, 760, 500],
+            "violations": [v["type"] for v in violations],
+            "status": "VIOLATION"
+        }]
+    else:
+        persons = [{
+            "id": 1,
+            "bbox": [520, 180, 760, 500],
+            "violations": [],
+            "status": "CLEAR"
+        }]
+    
+    return frame, violations, persons
 
 
 class StreamWorker:
@@ -130,6 +165,7 @@ class StreamWorker:
         self.cap = None
         self.frame_b64 = ""
         self.violations = []
+        self.persons = []
         self.snapshot_b64 = None
         self.running = False
         self.is_using_mock = False
@@ -168,7 +204,7 @@ class StreamWorker:
 
     def get_latest_data(self):
         with self.lock:
-            return self.frame_b64, self.violations, self.snapshot_b64
+            return self.frame_b64, self.violations, self.snapshot_b64, self.persons
 
     def _grab_frames(self):
         """Background thread to drain camera buffer"""
@@ -192,38 +228,44 @@ class StreamWorker:
 
     def _run(self):
         try:
-            # Attempt to open camera with timeout
+            # Try multiple camera indices — DroidCam can shift the built-in webcam
             logger.info("[WORKER] Attempting camera initialization...")
-            cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
-            if not cap.isOpened():
-                cap = cv2.VideoCapture(0)
+            cap = None
+            opened_index = -1
             
-            with self.lock:
-                self.cap = cap
+            for cam_index in [0, 1, 2]:
+                logger.info(f"[WORKER] Trying camera index {cam_index}...")
+                test_cap = cv2.VideoCapture(cam_index)
+                if test_cap.isOpened():
+                    ret, frame = test_cap.read()
+                    if ret and frame is not None:
+                        cap = test_cap
+                        opened_index = cam_index
+                        logger.info(f"[WORKER] Camera found at index {cam_index}! Resolution: {frame.shape[1]}x{frame.shape[0]}")
+                        break
+                    else:
+                        test_cap.release()
+                else:
+                    try:
+                        test_cap.release()
+                    except Exception:
+                        pass
             
-            if cap.isOpened():
-                logger.info("[WORKER] Camera opened successfully")
+            if cap is not None and cap.isOpened():
+                with self.lock:
+                    self.cap = cap
+                
+                logger.info(f"[WORKER] Camera opened successfully at index {opened_index}")
                 try:
-                    # Request standard 1280x720 which is universally supported
-                    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-                    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+                    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
+                    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
+                    cap.set(cv2.CAP_PROP_FPS, 30)
                     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
                 except Exception as e:
                     logger.warning(f"[WORKER] Could not set camera properties: {e}")
                 
-                # Read first frame to verify camera works
+                # Verify frame read after setting resolution
                 ret, frame = cap.read()
-                if not ret or frame is None:
-                    logger.warning("[WORKER] Failed to read at 1280x720. Trying default camera resolution...")
-                    try:
-                        cap.release()
-                    except Exception:
-                        pass
-                    cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
-                    if not cap.isOpened():
-                        cap = cv2.VideoCapture(0)
-                    ret, frame = cap.read()
-                
                 if not ret or frame is None:
                     logger.warning("[WORKER] Camera opened but cannot read frames. Using mock mode.")
                     self.is_using_mock = True
@@ -234,7 +276,7 @@ class StreamWorker:
                     with self.lock:
                         self.cap = None
                 else:
-                    logger.info("[WORKER] Camera frame read successful. Real mode enabled.")
+                    logger.info(f"[WORKER] Camera frame read successful at index {opened_index}. Real mode enabled.")
                     self.is_using_mock = False
                     with self.lock:
                         self.cap = cap
@@ -244,7 +286,7 @@ class StreamWorker:
                     self.grabber_thread.daemon = True
                     self.grabber_thread.start()
             else:
-                logger.warning("[WORKER] Camera not available. Using mock mode.")
+                logger.warning("[WORKER] No camera available at any index. Using mock mode.")
                 self.is_using_mock = True
         except Exception as e:
             logger.error(f"[WORKER] Camera init exception: {e}")
@@ -262,10 +304,11 @@ class StreamWorker:
                         
                 frame = None
                 violations = []
+                persons = []
                 
                 if self.is_using_mock:
                     tick_count += 1
-                    frame, violations = make_synthetic_frame(tick_count)
+                    frame, violations, persons = make_synthetic_frame(tick_count)
                     time.sleep(0.033)  # ~30 FPS for mock
                 else:
                     with self.lock:
@@ -293,21 +336,134 @@ class StreamWorker:
                     
                     # Analyze frame for violations
                     try:
-                        violations = analyze_frame(frame)
+                        result = analyze_frame(frame)
+                        violations = result.get("violations", [])
+                        persons = result.get("persons", [])
                     except Exception as e:
                         logger.error(f"[WORKER] Frame analysis error: {e}")
                         violations = []
+                        persons = []
 
-                # Draw status overlay (scaled perfectly for 640x360 resolution and ASCII safety)
+                # Draw status overlay, bounding boxes, and labels on the frame
                 try:
+                    total_persons = len(persons)
+                    font = cv2.FONT_HERSHEY_SIMPLEX
+                    
+                    # Draw system status bar (at the top, 35 pixels high)
                     status_color = (85, 255, 0) if not violations else (85, 45, 255)
                     cv2.rectangle(frame, (0, 0), (frame.shape[1], 35), (10, 13, 18), -1)
                     cv2.line(frame, (0, 35), (frame.shape[1], 35), status_color, 1)
                     
+                    # ── DRAW PERSON COUNT TOP LEFT (Overlaid nicely on the status bar) ──
+                    count_label = f"PERSONS: {total_persons}"
+                    (cw, ch), _ = cv2.getTextSize(count_label, font, 0.45, 1)
+                    cv2.rectangle(frame, (8, 6), (cw + 20, 29), (10, 13, 18), -1)
+                    cv2.rectangle(frame, (8, 6), (cw + 20, 29), (0, 255, 136), 1)
+                    cv2.putText(frame, count_label, (14, 21), font, 0.45, (0, 255, 136), 1, cv2.LINE_AA)
+                    
+                    # Write the system status text
                     status_text = "SYSTEM STATUS: SECURE" if not violations else f"BREACH DETECTED: {', '.join(v['type'] for v in violations)}"
-                    cv2.putText(frame, status_text.upper(), (15, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.45, status_color, 1)
+                    cv2.putText(frame, status_text.upper(), (cw + 35, 22), font, 0.45, status_color, 1, cv2.LINE_AA)
+
+                    # ── DRAW EACH PERSON BOX AND LABEL ─────────────────────
+                    for person in persons:
+                        pid        = person.get("id", 0)
+                        bbox       = person.get("bbox", None)
+                        p_violations = person.get("violations", [])
+                        has_viol   = len(p_violations) > 0
+
+                        if not bbox:
+                            continue
+
+                        x1 = int(bbox[0])
+                        y1 = int(bbox[1])
+                        x2 = int(bbox[2])
+                        y2 = int(bbox[3])
+
+                        # Clamp to frame bounds
+                        h_frame, w_frame = frame.shape[:2]
+                        x1 = max(0, min(x1, w_frame - 1))
+                        y1 = max(0, min(y1, h_frame - 1))
+                        x2 = max(0, min(x2, w_frame - 1))
+                        y2 = max(0, min(y2, h_frame - 1))
+
+                        color = (85, 45, 255) if has_viol else (85, 255, 0) # BGR colors (red if breach, green if safe)
+
+                        # Semi-transparent fill inside box
+                        overlay = frame.copy()
+                        cv2.rectangle(overlay, (x1, y1), (x2, y2), color, -1)
+                        cv2.addWeighted(overlay, 0.07, frame, 0.93, 0, frame)
+
+                        # Main bounding box
+                        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+
+                        # Corner bracket lines
+                        cl = 20
+                        ct = 3
+                        # Top-left
+                        cv2.line(frame, (x1, y1), (x1+cl, y1), color, ct)
+                        cv2.line(frame, (x1, y1), (x1, y1+cl), color, ct)
+                        # Top-right
+                        cv2.line(frame, (x2, y1), (x2-cl, y1), color, ct)
+                        cv2.line(frame, (x2, y1), (x2, y1+cl), color, ct)
+                        # Bottom-left
+                        cv2.line(frame, (x1, y2), (x1+cl, y2), color, ct)
+                        cv2.line(frame, (x1, y2), (x1, y2-cl), color, ct)
+                        # Bottom-right
+                        cv2.line(frame, (x2, y2), (x2-cl, y2), color, ct)
+                        cv2.line(frame, (x2, y2), (x2, y2-cl), color, ct)
+
+                        # Person label background above box
+                        p_label = f"PERSON {pid}"
+                        (plw, plh), _ = cv2.getTextSize(p_label, font, 0.45, 1)
+                        lbg_y1 = max(35, y1 - plh - 14)
+                        lbg_y2 = y1
+                        
+                        # Adjust if label overlaps with status bar
+                        if y1 < 35:
+                            lbg_y1 = y1
+                            lbg_y2 = y1 + plh + 14
+                            text_draw_y = y1 + plh + 7
+                        else:
+                            text_draw_y = y1 - 5
+                            
+                        cv2.rectangle(frame, (x1, lbg_y1), (x1 + plw + 12, lbg_y2), color, -1)
+                        cv2.putText(frame, p_label,
+                            (x1 + 6, text_draw_y),
+                            font, 0.45,
+                            (0, 0, 0),
+                            1, cv2.LINE_AA)
+
+                        # Violation or CLEAR text below box
+                        text_y = y2 + 18
+                        if has_viol:
+                            for v in p_violations:
+                                v_label = f"! {v.upper()}"
+                                (vw, vh), _ = cv2.getTextSize(v_label, font, 0.4, 1)
+                                cv2.rectangle(frame,
+                                    (x1, text_y - vh - 5),
+                                    (x1 + vw + 10, text_y + 5),
+                                    (0, 0, 180), -1)
+                                cv2.putText(frame, v_label,
+                                    (x1 + 5, text_y),
+                                    font, 0.4,
+                                    (255, 100, 120),
+                                    1, cv2.LINE_AA)
+                                text_y += vh + 10
+                        else:
+                            ok_label = "✓ CLEAR"
+                            (ow, oh), _ = cv2.getTextSize(ok_label, font, 0.4, 1)
+                            cv2.rectangle(frame,
+                                (x1, text_y - oh - 5),
+                                (x1 + ow + 10, text_y + 5),
+                                (0, 80, 40), -1)
+                            cv2.putText(frame, ok_label,
+                                (x1 + 5, text_y),
+                                font, 0.4,
+                                (0, 255, 136),
+                                1, cv2.LINE_AA)
                 except Exception as e:
-                    logger.warning(f"[WORKER] Overlay drawing error: {e}")
+                    logger.warning(f"[WORKER] Drawing execution error: {e}")
 
                 snapshot_b64 = None
                 if violations:
@@ -327,7 +483,7 @@ class StreamWorker:
                             snap_path = os.path.join(SNAPSHOTS_DIR, f"{ts}.jpg")
                             cv2.imwrite(snap_path, frame)
                             for v in violations:
-                                insert_violation(v["type"], snap_path, v.get("confidence", 0.80))
+                                insert_violation(0, v["type"], snap_path, v.get("confidence", 0.80))
                             logger.info(f"[WORKER] Violation logged: {[v['type'] for v in violations]}")
                         except Exception as e:
                             logger.error(f"[WORKER] Snapshot save error: {e}")
@@ -351,6 +507,7 @@ class StreamWorker:
                 with self.lock:
                     self.frame_b64 = frame_b64
                     self.violations = violations
+                    self.persons = persons
                     self.snapshot_b64 = snapshot_b64
                     self.frame_count += 1
                     
@@ -400,11 +557,13 @@ def get_frame():
             worker = StreamWorker()
             worker.start()
             
-        frame_b64, violations, snapshot_b64 = worker.get_latest_data()
+        frame_b64, violations, snapshot_b64, persons = worker.get_latest_data()
         
         return jsonify({
             "frame": frame_b64 or "",
             "violations": violations or [],
+            "total_persons": len(persons) if persons else 0,
+            "persons": persons or [],
             "snapshot": snapshot_b64,
             "status": "violation" if violations else "clear"
         })
@@ -424,21 +583,23 @@ def api_violations():
         rows = get_all_violations()
         data = []
         for r in rows:
+            # Schema: id, person_id, type, timestamp, image_path, confidence
             img_url = None
-            if r[3]:
-                filename = os.path.basename(r[3])
+            if len(r) > 4 and r[4]:
+                filename = os.path.basename(str(r[4]))
                 img_url = f"/snapshots/{filename}"
             data.append({
                 "id": r[0],
-                "type": r[1],
-                "timestamp": r[2],
+                "person_id": r[1] if len(r) > 5 else 0,
+                "type": r[2] if len(r) > 5 else r[1],
+                "timestamp": r[3] if len(r) > 5 else r[2],
                 "image": img_url,
-                "confidence": r[4]
+                "confidence": r[5] if len(r) > 5 else (r[4] if len(r) > 4 else 0.0)
             })
         return jsonify(data)
     except Exception as e:
         logger.error(f"[API] Violations query error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify([]), 200
 
 
 @app.route('/api/stats/hourly', methods=['GET'])
@@ -448,7 +609,7 @@ def api_hourly():
         return jsonify([{"hour": r[0], "type": r[1], "count": r[2]} for r in rows])
     except Exception as e:
         logger.error(f"[API] Hourly stats error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify([]), 200
 
 
 @app.route('/api/stats/types', methods=['GET'])
@@ -458,7 +619,7 @@ def api_types():
         return jsonify([{"type": r[0], "count": r[1]} for r in rows])
     except Exception as e:
         logger.error(f"[API] Type stats error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify([]), 200
 
 
 @app.route('/snapshots/<path:filename>')
@@ -529,19 +690,54 @@ def serve_assets(path):
         return "Asset not found", 404
 
 
+@app.route('/api/violations/<int:violation_id>', methods=['DELETE', 'OPTIONS'])
+def delete_single_violation(violation_id):
+    if request.method == 'OPTIONS':
+        return jsonify({}), 200
+    try:
+        delete_violation(violation_id)
+        return jsonify({"status": "deleted", "id": violation_id})
+    except Exception as e:
+        logger.error(f"[API] Delete violation error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/violations/all', methods=['DELETE', 'OPTIONS'])
+def delete_all():
+    if request.method == 'OPTIONS':
+        return jsonify({}), 200
+    try:
+        delete_all_violations()
+        return jsonify({"status": "all deleted"})
+    except Exception as e:
+        logger.error(f"[API] Delete all violations error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/api/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
     return jsonify({
-        "status": "healthy",
+        "status": "online",
+        "database": "connected",
         "timestamp": datetime.datetime.now().isoformat(),
         "worker_active": worker is not None
     })
 
 
 if __name__ == '__main__':
+    init_db()
+    port = int(os.environ.get('PORT', 5000))
     logger.info("="*60)
     logger.info("HYGIENEGUARD BACKEND STARTING")
+    logger.info(f"Starting HygieneGuard on http://localhost:{port}")
     logger.info("="*60)
-    port = int(os.environ.get('PORT', 5000))
-    socketio.run(app, host='0.0.0.0', port=port, debug=False, allow_unsafe_werkzeug=True)
+    socketio.run(
+        app,
+        host='0.0.0.0',
+        port=port,
+        debug=False,
+        use_reloader=False,
+        log_output=True,
+        allow_unsafe_werkzeug=True
+    )

@@ -332,9 +332,27 @@ function drawMockFrame() {
     : "✓ SYSTEM STATUS: SECURE & SAFE";
   ctx.fillText(txt, 15, 18);
 
+  // Build per-person data for simulation
+  const persons = [];
+  if (violations.length > 0) {
+    persons.push({
+      id: 1,
+      violations: violations.map(v => v.type),
+      status: "VIOLATION"
+    });
+  } else {
+    persons.push({
+      id: 1,
+      violations: [],
+      status: "CLEAR"
+    });
+  }
+
   return {
     frame: canvas.toDataURL("image/jpeg").split(",")[1], // Extract Base64
     violations: violations,
+    total_persons: persons.length,
+    persons: persons,
     status: violations.length > 0 ? "violation" : "clear"
   };
 }
