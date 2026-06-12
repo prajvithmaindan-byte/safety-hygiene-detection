@@ -155,16 +155,84 @@ function toggleMute() {
   }
 }
 
-// ─── CAMERA CONTROLS ─────────────────────────────────────────────
+// Camera source switcher change event listener
+document.addEventListener("DOMContentLoaded", () => {
+  const cameraSelect = document.getElementById('cameraSource');
+  const customInput = document.getElementById('customUrl');
+  const droidcamInput = document.getElementById('droidcamIp');
+  
+  if (cameraSelect) {
+    cameraSelect.addEventListener('change', function() {
+      const val = this.value;
+      if (customInput) customInput.style.display = (val === 'custom') ? 'block' : 'none';
+      if (droidcamInput) droidcamInput.style.display = (val === 'droidcam_wifi') ? 'block' : 'none';
+      localStorage.setItem("hg_camera_source_dropdown", val);
+    });
+
+    // Restore saved choice
+    const savedSource = localStorage.getItem("hg_camera_source_dropdown");
+    if (savedSource) {
+      cameraSelect.value = savedSource;
+      if (customInput) customInput.style.display = (savedSource === 'custom') ? 'block' : 'none';
+      if (droidcamInput) droidcamInput.style.display = (savedSource === 'droidcam_wifi') ? 'block' : 'none';
+    }
+  }
+  
+  if (droidcamInput) {
+    droidcamInput.value = localStorage.getItem("hg_droidcam_ip") || "172.26.161.207";
+  }
+});
+
+// Update startCamera to use selected source
 async function startCamera() {
   initAudio();
+  let source = document.getElementById('cameraSource').value;
+  if (source === 'custom') {
+    source = document.getElementById('customUrl').value;
+  } else if (source === 'droidcam_wifi') {
+    let ip = document.getElementById('droidcamIp').value.trim();
+    if (!ip) {
+      alert("Please enter a valid IP address!");
+      return;
+    }
+    // Clean input (strip protocols, paths, etc.)
+    ip = ip.replace(/^(https?:\/\/)/i, "");
+    ip = ip.replace(/(\/video|\/mjpegfeed|\/)$/i, "");
+    localStorage.setItem("hg_droidcam_ip", ip);
+    
+    if (!ip.includes(":")) {
+      source = `http://${ip}:4747/video`;
+    } else {
+      source = `http://${ip}/video`;
+    }
+  }
+
+  // Try to parse as number
+  const num = parseInt(source);
+  const payload = isNaN(num)
+      ? { source: source }
+      : { source: num };
+
   try {
-    const res = await fetch(`${API_BASE}/start`, { method: 'POST' });
+    const res = await fetch(`${API_BASE}/start`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
     const data = await res.json();
-    if (data.status === "started") {
+    if (res.ok && data && data.status === "started") {
       isStreaming = true;
       document.getElementById("cameraPlaceholder").style.display = "none";
       document.getElementById("cameraFeed").style.display = "block";
+      
+      // Set native MJPEG stream if not in simulation mode
+      const isSim = isSimulationMode() || window.hg_backend_offline;
+      if (!isSim) {
+        document.getElementById("cameraFeed").src = `${getApiBase()}/api/stream?t=${new Date().getTime()}`;
+      }
+      
       document.getElementById("startBtn").style.display = "none";
       document.getElementById("stopBtn").style.display = "inline-block";
       document.getElementById("audioBar").classList.add("playing");
@@ -176,10 +244,59 @@ async function startCamera() {
       
       // Start processing loop
       pollFrame();
+    } else {
+      alert("Camera error: " + ((data && data.message) || "Check camera source and try again"));
     }
   } catch (err) {
     console.error("Failed to start camera", err);
     alert("Connection Error: Backend server is not running or camera is locked.");
+  }
+}
+
+// Test camera before starting
+async function testCamera() {
+  let source = document.getElementById('cameraSource').value;
+  if (source === 'custom') {
+    source = document.getElementById('customUrl').value;
+  } else if (source === 'droidcam_wifi') {
+    let ip = document.getElementById('droidcamIp').value.trim();
+    if (!ip) {
+      alert("Please enter a valid IP address!");
+      return;
+    }
+    // Clean input (strip protocols, paths, etc.)
+    ip = ip.replace(/^(https?:\/\/)/i, "");
+    ip = ip.replace(/(\/video|\/mjpegfeed|\/)$/i, "");
+    localStorage.setItem("hg_droidcam_ip", ip);
+    
+    if (!ip.includes(":")) {
+      source = `http://${ip}:4747/video`;
+    } else {
+      source = `http://${ip}/video`;
+    }
+  }
+  const num = parseInt(source);
+  const payload = isNaN(num)
+      ? { source: source }
+      : { source: num };
+
+  try {
+    const res = await fetch(`${API_BASE}/camera/test`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (res.ok && data && data.status === "ok") {
+      alert(data.message || "Test status: ok");
+    } else {
+      alert("Test Error: " + ((data && data.message) || "Camera is not available."));
+    }
+  } catch (err) {
+    console.error("Failed to test camera", err);
+    alert("Test Error: Camera is not available or backend server is not responding.");
   }
 }
 
@@ -196,6 +313,7 @@ async function stopCamera() {
   } catch(e) {}
   
   document.getElementById("cameraFeed").style.display = "none";
+  document.getElementById("cameraFeed").src = ""; // Stop the MJPEG request
   document.getElementById("cameraPlaceholder").style.display = "flex";
   document.getElementById("startBtn").style.display = "inline-block";
   document.getElementById("stopBtn").style.display = "none";
@@ -229,11 +347,14 @@ const MAX_POLL_ERRORS = 3;
 async function pollFrame() {
   if (!isStreaming) return;
   
+  const isSim = isSimulationMode() || window.hg_backend_offline;
+  const endpoint = isSim ? `${API_BASE}/frame` : `${API_BASE}/metadata`;
+  
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 1500); // 1.5s timeout for frame fetch
+    const timeoutId = setTimeout(() => controller.abort(), 1500); // 1.5s timeout
     
-    const res = await fetch(`${API_BASE}/frame`, { signal: controller.signal });
+    const res = await fetch(endpoint, { signal: controller.signal });
     clearTimeout(timeoutId);
     
     if (!res.ok) throw new Error("Server responded with error status");
@@ -242,12 +363,14 @@ async function pollFrame() {
     // Reset error counter
     consecutivePollErrors = 0;
     
-    // Update live frame source
+    // Update live frame source only in simulation mode
     const feed = document.getElementById("cameraFeed");
-    feed.src = `data:image/jpeg;base64,${data.frame}`;
+    if (isSim) {
+      feed.src = `data:image/jpeg;base64,${data.frame}`;
+    }
     
     // Update Violation Telemetry
-    updateAlertState(data.violations);
+    updateAlertState(data.violations || []);
     
     // Update persons panel
     updatePersonsPanel(data);
@@ -265,8 +388,9 @@ async function pollFrame() {
     }
   }
   
-  // Poll again after 33ms for smooth real-time stream (~30 FPS)
-  frameTimeout = setTimeout(pollFrame, 33);
+  // Poll again: 100ms for metadata (live mode), 66ms for simulated frames (simulation mode)
+  const pollInterval = isSim ? 66 : 100;
+  frameTimeout = setTimeout(pollFrame, pollInterval);
 }
 
 // ─── PERSONS PANEL RENDERER ──────────────────────────────────────

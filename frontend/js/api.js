@@ -33,7 +33,8 @@ function isSimulationMode() {
 
   const isLocal = window.location.hostname === "localhost" || 
                   window.location.hostname === "127.0.0.1" || 
-                  window.location.port === "5000";
+                  window.location.port === "5000" ||
+                  window.location.protocol === "file:";
   
   const customUrl = localStorage.getItem("hg_backend_url");
 
@@ -395,8 +396,9 @@ async function smartFetch(endpoint, options = {}) {
   const fullUrl = base + endpoint;
 
   try {
+    const timeoutMs = (endpoint === "/api/frame") ? 1500 : 10000;
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 2000); // 2 second timeout
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
     // Bypass ngrok and localtunnel landing warning page checks
     const requestHeaders = {
@@ -412,8 +414,6 @@ async function smartFetch(endpoint, options = {}) {
     });
     clearTimeout(timeoutId);
 
-    if (!response.ok) throw new Error("HTTP error status");
-    
     // Successfully connected to backend, verify live mode and clear offline flag
     localStorage.setItem("hg_mode", "live");
     window.hg_backend_offline = false;
@@ -468,6 +468,8 @@ function handleMockEndpoints(endpoint) {
       stopSimWebcam();
     }
     payload = { status: endpoint === "/api/start" ? "started" : "stopped" };
+  } else if (endpoint === "/api/camera/test") {
+    payload = { status: "ok", message: "Simulation Camera working" };
   } else if (endpoint === "/api/frame") {
     const simData = drawMockFrame();
     logSimulatedViolation(simData.violations);
@@ -599,6 +601,12 @@ function toggleBackendSettings() {
           <label style="display:block; font-size:0.75rem; color:var(--text-muted); margin-bottom:0.5rem; letter-spacing:1px;">FLASK SERVER URL</label>
           <input type="text" id="backendUrlInput" placeholder="http://localhost:5000" style="width:100%; padding:0.6rem 0.8rem; background:#0c0f14; border:1px solid var(--border); border-radius:4px; color:#e0e8f0; font-family:var(--font-display); font-size:0.9rem; outline:none; transition:border 0.2s;" />
         </div>
+
+        <div style="margin-bottom:1.5rem;">
+          <label style="display:block; font-size:0.75rem; color:var(--text-muted); margin-bottom:0.5rem; letter-spacing:1px;">CAMERA SOURCE (e.g. DroidCam IP / Index)</label>
+          <input type="text" id="cameraSourceInput" placeholder="http://192.168.1.5:4747/video or 0" style="width:100%; padding:0.6rem 0.8rem; background:#0c0f14; border:1px solid var(--border); border-radius:4px; color:#e0e8f0; font-family:var(--font-display); font-size:0.9rem; outline:none; transition:border 0.2s;" />
+        </div>
+
         <div style="display:flex; justify-content:end; gap:0.75rem;">
           <button onclick="closeBackendSettings()" style="background:transparent; border:1px solid var(--border); color:var(--text-muted); padding:0.5rem 1rem; border-radius:4px; font-weight:600; cursor:pointer; font-family:Rajdhani;">CANCEL</button>
           <button onclick="saveBackendSettings()" style="background:#00ff88; border:none; color:#06080c; padding:0.5rem 1.2rem; border-radius:4px; font-weight:700; cursor:pointer; font-family:Rajdhani;">SAVE & RELOAD</button>
@@ -610,13 +618,16 @@ function toggleBackendSettings() {
     // Style inputs dynamically
     const style = document.createElement("style");
     style.innerHTML = `
-      #backendUrlInput:focus { border-color: #00ff88 !important; box-shadow: 0 0 5px rgba(0,255,136,0.2); }
+      #backendUrlInput:focus, #cameraSourceInput:focus { border-color: #00ff88 !important; box-shadow: 0 0 5px rgba(0,255,136,0.2); }
     `;
     document.head.appendChild(style);
   }
 
   const current = localStorage.getItem("hg_backend_url") || "";
   document.getElementById("backendUrlInput").value = current;
+
+  const currentCam = localStorage.getItem("hg_camera_source") || "";
+  document.getElementById("cameraSourceInput").value = currentCam;
 
   const currentMode = localStorage.getItem("hg_mode") || "live";
   window.setModalMode(currentMode);
@@ -639,6 +650,13 @@ function saveBackendSettings() {
     localStorage.removeItem("hg_backend_url");
   } else {
     localStorage.setItem("hg_backend_url", val);
+  }
+  
+  const camVal = document.getElementById("cameraSourceInput").value.trim();
+  if (camVal === "") {
+    localStorage.removeItem("hg_camera_source");
+  } else {
+    localStorage.setItem("hg_camera_source", camVal);
   }
   
   localStorage.setItem("hg_mode", selectedModalMode);

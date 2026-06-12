@@ -40,6 +40,49 @@
     <a href="analytics.html">ANALYTICS</a>
   </div>
   <div style="display:flex;align-items:center;gap:1.5rem;">
+    <!-- Camera Source Switcher -->
+    <div id="cameraPanel" style="display:flex; align-items:center; gap:0.5rem;">
+      <select id="cameraSource" style="
+          font-family: Orbitron, monospace;
+          font-size: 0.7rem;
+          letter-spacing: 1px;
+          padding: 0.5rem 0.8rem;
+          background: rgba(0, 242, 254, 0.1);
+          border: 1px solid var(--border);
+          color: var(--green);
+          border-radius: 6px;
+          cursor: pointer;
+          outline: none;
+          transition: all 0.3s;">
+          <option value="0" style="background:#0a0620; color:#fff;">💻 LAPTOP CAM</option>
+          <option value="1" style="background:#0a0620; color:#fff;">📷 USB CAM</option>
+          <option value="droidcam_wifi" style="background:#0a0620; color:#fff;">📱 DROIDCAM WIFI</option>
+          <option value="http://localhost:4747/video" style="background:#0a0620; color:#fff;">🔌 DROIDCAM USB</option>
+          <option value="custom" style="background:#0a0620; color:#fff;">✏ CUSTOM URL</option>
+      </select>
+      <input id="droidcamIp" type="text"
+          placeholder="Enter DroidCam IP (e.g. 172.26.161.207)"
+          style="display:none;
+          font-family: Orbitron, monospace;
+          font-size: 0.7rem; padding: 0.5rem;
+          background: rgba(0,0,0,0.5);
+          border: 1px solid var(--border);
+          color: var(--green); border-radius: 6px;
+          width: 210px;
+          outline: none;"/>
+      <input id="customUrl" type="text"
+          placeholder="Enter camera URL"
+          style="display:none;
+          font-family: Orbitron, monospace;
+          font-size: 0.7rem; padding: 0.5rem;
+          background: rgba(0,0,0,0.5);
+          border: 1px solid var(--border);
+          color: var(--green); border-radius: 6px;
+          width: 200px;
+          outline: none;"/>
+      <button class="btn btn-green" id="testCamBtn" onclick="testCamera()" style="padding:0.5rem 1rem;">TEST</button>
+    </div>
+
     <div class="audio-bar" id="audioBar">
       <span></span><span></span><span></span><span></span><span></span>
     </div>

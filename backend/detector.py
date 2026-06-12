@@ -1,373 +1,285 @@
 import cv2
 import mediapipe as mp
 import numpy as np
+import collections
 
-# Use the exact correct solution path for FaceMesh
-mp_face_mesh = mp.solutions.face_mesh.FaceMesh
-mp_hands = mp.solutions.hands
+mp_face_mesh = mp.solutions.face_mesh
+mp_hands     = mp.solutions.hands
 
-
-face_mesh = mp_face_mesh(
+face_mesh = mp_face_mesh.FaceMesh(
+    static_image_mode=False,
     max_num_faces=10,
-    min_detection_confidence=0.4,
-    min_tracking_confidence=0.4,
-    refine_landmarks=False
+    refine_landmarks=True,
+    min_detection_confidence=0.35,
+    min_tracking_confidence=0.35
 )
-hands_detector = mp_hands.Hands(
-    max_num_hands=10,
-    min_detection_confidence=0.4,
-    min_tracking_confidence=0.4,
-    model_complexity=0
+hands = mp_hands.Hands(
+    static_image_mode=False,
+    max_num_hands=20,
+    min_detection_confidence=0.35,
+    min_tracking_confidence=0.35
 )
-hands = hands_detector
 
-# ─── MASK DETECTION ────────────────────────────────────────────────
-# Uses mouth landmark spread AND lip visibility to confirm no mask
-MOUTH_LANDMARKS = [61, 291, 0, 17, 269, 270, 409, 291, 375, 321, 405, 314]
-UPPER_LIP = [13, 312, 311, 310, 415, 308]
-LOWER_LIP = [14, 317, 402, 318, 324, 308]
+MOUTH_INDICES = [13, 14, 78, 308, 80, 310, 82, 312]
 
-def check_mask(face_landmarks, frame, frame_h, frame_w):
-    """
-    Returns True if NO mask is worn (violation).
-    Returns False if mask IS worn (safe).
+# Violation smoothing — confirm only after 3 of 4 frames
+violation_history = collections.defaultdict(
+    lambda: collections.deque(maxlen=4))
+
+# Person ID tracker
+person_tracker = {}
+
+def preprocess_frame(frame):
+    # MediaPipe is highly optimized for raw camera feeds; upscaling and heavy filters
+    # are CPU-intensive and cause lag. Returning the frame directly maximizes FPS.
+    return frame
+
+def get_face_bbox(face_lm, h, w):
+    xs = [lm.x * w for lm in face_lm.landmark]
+    ys = [lm.y * h for lm in face_lm.landmark]
+    pad = 25
+    return (max(0, int(min(xs))-pad),
+            max(0, int(min(ys))-pad),
+            min(w, int(max(xs))+pad),
+            min(h, int(max(ys))+pad))
+
+def check_mask(face_lm, frame, h, w, face_height_px):
+    # Get center of mouth (landmark 13)
+    mouth_center = face_lm.landmark[13]
+    cx = int(mouth_center.x * w)
+    cy = int(mouth_center.y * h)
     
-    Logic: Samples a precise bounding box tightly focused on the mouth region.
-    If the mouth region contains skin colors, no mask is worn.
-    If skin color ratio is low, it indicates a mask is covering the mouth.
-    """
-    # Mouth center landmark (0 or 13)
-    lm_mouth = face_landmarks.landmark[13]
-    cx = int(lm_mouth.x * frame_w)
-    cy = int(lm_mouth.y * frame_h)
+    # Define ROI size dynamically based on face height to stay scale-invariant
+    roi_size = max(5, int(face_height_px * 0.12))
     
-    # Face width for reference size
-    left_x = face_landmarks.landmark[234].x * frame_w
-    right_x = face_landmarks.landmark[454].x * frame_w
-    face_width = abs(right_x - left_x)
+    y1, y2 = max(0, cy - roi_size), min(h, cy + roi_size)
+    x1, x2 = max(0, cx - roi_size), min(w, cx + roi_size)
+    roi = frame[y1:y2, x1:x2]
     
-    # Tighter ROI focused strictly on the mouth to prevent cheek/chin skin leakage
-    rw = int(face_width * 0.12)
-    rh = int(face_width * 0.06)
-    
-    # Bounds check
-    min_x = max(0, cx - rw)
-    max_x = min(frame_w - 1, cx + rw)
-    min_y = max(0, cy - rh)
-    max_y = min(frame_h - 1, cy + rh)
-    
-    if (max_x - min_x) < 5 or (max_y - min_y) < 5:
-        return False  # Uncertain, skip
-        
-    mouth_roi = frame[min_y:max_y+1, min_x:max_x+1]
-    if mouth_roi.size == 0:
+    if roi.size == 0:
         return False
         
-    # Convert to HSV
-    hsv = cv2.cvtColor(mouth_roi, cv2.COLOR_BGR2HSV)
+    # Check skin color ratio in mouth area.
+    hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+    skin_mask = cv2.inRange(hsv, np.array([0, 15, 60]), np.array([25, 255, 255]))
+    skin_ratio = np.sum(skin_mask > 0) / skin_mask.size
     
-    # Robust dual skin tone HSV thresholds (fully inclusive of all skin tones and lighting conditions)
-    lower1 = np.array([0, 15, 40])
-    upper1 = np.array([20, 255, 255])
-    lower2 = np.array([160, 15, 40])
-    upper2 = np.array([180, 255, 255])
-    
-    mask1 = cv2.inRange(hsv, lower1, upper1)
-    mask2 = cv2.inRange(hsv, lower2, upper2)
-    combined = cv2.bitwise_or(mask1, mask2)
-    
-    skin_ratio = np.sum(combined > 0) / combined.size
-    
-    # Telemetry logging to diagnose detection threshold
-    print(f"[Telemetry] Mouth Skin Ratio: {skin_ratio:.3f} | No Mask Detected: {skin_ratio > 0.25}")
-    
-    # If skin ratio is high (> 25%), skin is exposed -> NO mask (True = violation)
-    # If skin ratio is low (< 25%), mouth is covered by a mask -> Mask worn (False = safe)
-    no_mask = skin_ratio > 0.25
-    return no_mask
+    # If skin ratio is low, it indicates a mask is worn (returns True)
+    return skin_ratio < 0.18
 
-
-# ─── NOSE TOUCH DETECTION ─────────────────────────────────────────
-NOSE_TIP = 4
-NOSE_BRIDGE_LANDMARKS = [1, 2, 4, 5, 6, 19, 20, 94, 195, 197]
-
-def check_nose_touching(face_landmarks, hand_landmarks_list, frame_h, frame_w):
-    """
-    Returns True if 1 or more fingertips are within the scale-invariant proximity threshold of the nose tip.
-    Uses nose tip (landmark 4) as anchor.
-    """
-    # Nose tip position
-    nose = face_landmarks.landmark[NOSE_TIP]
-    nx = nose.x * frame_w
-    ny = nose.y * frame_h
-
-    # Face scale reference: face width (distance between landmarks 234 and 454)
-    left_x = face_landmarks.landmark[234].x * frame_w
-    right_x = face_landmarks.landmark[454].x * frame_w
-    face_width = abs(right_x - left_x)
-
-    # Proximity threshold: 22% of face width (highly robust and standard)
-    threshold = face_width * 0.22
-
-    FINGERTIPS = [4, 8, 12, 16, 20]
-    for hand in hand_landmarks_list:
-        for tip_idx in FINGERTIPS:
-            lm = hand.landmark[tip_idx]
-            hx = lm.x * frame_w
-            hy = lm.y * frame_h
-            dist = np.sqrt((hx - nx)**2 + (hy - ny)**2)
-            if dist < threshold:
-                return True  # Responsive single-finger nose touch confirmation
+def check_nose_touch(face_lm, hand_list, h, w, face_height_px):
+    nose = face_lm.landmark[1]
+    nx, ny = nose.x * w, nose.y * h
+    # Scale-invariant nose touch threshold (22% of face height)
+    threshold = face_height_px * 0.22
+    for hand in hand_list:
+        for lm in hand.landmark:
+            hx, hy = lm.x * w, lm.y * h
+            if abs(hx - nx) < threshold and abs(hy - ny) < threshold:
+                return True
     return False
 
-
-# ─── HAIR TOUCH DETECTION ─────────────────────────────────────────
-FOREHEAD_LANDMARKS = [10, 67, 109, 338, 297]  # Top of head region
-
-def check_hair_touching(face_landmarks, hand_landmarks_list, frame_h, frame_w):
-    """
-    Returns True if 1 or more fingertips are in the hair/scalp zone.
-    Uses forehead landmark y with a scale-invariant threshold as the boundary.
-    """
-    # Average forehead y position
-    forehead_ys = [face_landmarks.landmark[i].y * frame_h for i in FOREHEAD_LANDMARKS]
-    forehead_y = np.mean(forehead_ys)
-
-    # Face width for scale-invariant thresholds
-    left_x = face_landmarks.landmark[234].x * frame_w
-    right_x = face_landmarks.landmark[454].x * frame_w
-    face_width = abs(right_x - left_x)
-    margin = face_width * 0.4  # Widen search horizontal margin to 40% to catch side hair touches
-    
-    # Scale-invariant vertical tolerance (allows touching upper forehead/hairline)
-    tolerance = face_width * 0.15
-
-    FINGERTIPS = [4, 8, 12, 16, 20]
-    hair_touch_count = 0
-
-    for hand in hand_landmarks_list:
-        for tip_idx in FINGERTIPS:
-            lm = hand.landmark[tip_idx]
-            hx = lm.x * frame_w
-            hy = lm.y * frame_h
-
-            # Hand must be ABOVE the forehead boundary (with vertical tolerance)
-            # and horizontally within the width of the face plus margin
-            above_forehead = hy < (forehead_y + tolerance)
-            within_face_width = (left_x - margin) < hx < (right_x + margin)
-
-            if above_forehead and within_face_width:
-                hair_touch_count += 1
-                if hair_touch_count >= 1:
-                    return True  # Responsive single-finger hair touch confirmation
+def check_hair_touch(face_lm, hand_list, h, w, face_height_px):
+    fore = face_lm.landmark[10]
+    fx, fy = fore.x * w, fore.y * h
+    # Scale-invariant hair touch horizontal threshold (30% of face height)
+    thresh_x = face_height_px * 0.30
+    # Scale-invariant vertical boundary relative to forehead
+    min_y = -0.10 * face_height_px
+    max_y = 0.55 * face_height_px
+    for hand in hand_list:
+        for lm in hand.landmark:
+            hx, hy = lm.x * w, lm.y * h
+            dy = fy - hy
+            if abs(hx - fx) < thresh_x and min_y < dy < max_y:
+                return True
     return False
 
-
-# ─── GLOVE DETECTION ──────────────────────────────────────────────
-def check_gloves(hand_landmarks_list, frame, frame_h, frame_w):
-    """
-    Returns True if gloves ARE worn (safe).
-    Returns False if bare skin detected (violation).
-    
-    Samples palm center + multiple points.
-    Uses HSV skin detection with strict thresholds.
-    Only flags violation if majority of samples show skin.
-    """
-    if not hand_landmarks_list:
-        return True  # No hands visible → no violation
-
-    PALM_SAMPLE_LANDMARKS = [0, 5, 9, 13, 17]  # Wrist + knuckle base points
-
-    for hand in hand_landmarks_list:
-        skin_hits = 0
-        total_samples = 0
-
-        for lm_idx in PALM_SAMPLE_LANDMARKS:
-            lm = hand.landmark[lm_idx]
-            cx = int(lm.x * frame_w)
-            cy = int(lm.y * frame_h)
-
-            # Bounds check
-            if not (20 < cx < frame_w - 20 and 20 < cy < frame_h - 20):
+def check_gloves(hand_list, frame, h, w):
+    if not hand_list:
+        return True
+    for hand in hand_list:
+        palm = hand.landmark[9]
+        wrist = hand.landmark[0]
+        # Calculate palm/hand scale dynamically to keep ROI size scale-invariant
+        hand_scale_px = np.sqrt(((palm.x - wrist.x) * w) ** 2 + ((palm.y - wrist.y) * h) ** 2)
+        roi_radius = max(4, int(hand_scale_px * 0.25))
+        
+        cx = int(palm.x * w)
+        cy = int(palm.y * h)
+        if 0 < cx < w and 0 < cy < h:
+            y1, y2 = max(0, cy - roi_radius), min(h, cy + roi_radius)
+            x1, x2 = max(0, cx - roi_radius), min(w, cx + roi_radius)
+            roi = frame[y1:y2, x1:x2]
+            if roi.size == 0:
                 continue
-
-            # Sample 20x20 patch
-            patch = frame[cy-10:cy+10, cx-10:cx+10]
-            if patch.size == 0:
-                continue
-
-            hsv = cv2.cvtColor(patch, cv2.COLOR_BGR2HSV)
-
-            # Multi-range skin detection (covers different skin tones)
-            lower1 = np.array([0, 30, 60])
-            upper1 = np.array([15, 170, 255])
-            lower2 = np.array([160, 30, 60])
-            upper2 = np.array([180, 170, 255])
-
-            mask1 = cv2.inRange(hsv, lower1, upper1)
-            mask2 = cv2.inRange(hsv, lower2, upper2)
-            combined = cv2.bitwise_or(mask1, mask2)
-
-            skin_ratio = np.sum(combined > 0) / combined.size
-            total_samples += 1
-            if skin_ratio > 0.45:  # Stricter skin threshold
-                skin_hits += 1
-
-        if total_samples == 0:
-            continue
-
-        # Only flag if majority (>70%) of samples show skin
-        if skin_hits / total_samples > 0.7:
-            return False  # No gloves — violation
-
-    return True  # Gloves detected or uncertain → safe
-
-
-# ─── DEBOUNCE / STABILITY SYSTEM ──────────────────────────────────
-# Prevents flicker: violation must appear in N consecutive frames
-
-VIOLATION_BUFFER = {}
-REQUIRED_FRAMES = 6  # Must detect for 6 frames in a row
-
-def stabilize_violations(new_violations):
-    """
-    Only return a violation if it has been detected for REQUIRED_FRAMES
-    consecutive frames. Clears count if not detected in a frame.
-    """
-    global VIOLATION_BUFFER
-    current_types = {v["type"] for v in new_violations}
-
-    # Increment counts for detected, reset for non-detected
-    all_known = set(VIOLATION_BUFFER.keys()) | current_types
-    for vtype in all_known:
-        if vtype in current_types:
-            VIOLATION_BUFFER[vtype] = VIOLATION_BUFFER.get(vtype, 0) + 1
-        else:
-            VIOLATION_BUFFER[vtype] = 0
-
-    # Only pass through violations that have been stable
-    stable = []
-    for v in new_violations:
-        if VIOLATION_BUFFER.get(v["type"], 0) >= REQUIRED_FRAMES:
-            stable.append(v)
-
-    return stable
-
-
-# ─── MAIN ANALYSIS ────────────────────────────────────────────────
-def analyze_frame(frame):
-    """
-    Main entry point. Returns per-person violations with structure:
-    {
-        "total_persons": int,
-        "persons": [{"id": int, "violations": [str], "status": str}, ...],
-        "violations": [{"type": str, "confidence": float}, ...]  # flat list for backward compat
-    }
-    """
-    h, w = frame.shape[:2]
-    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
-    face_results = face_mesh.process(rgb)
-    hand_results = hands_detector.process(rgb)
-
-    hand_landmarks_list = hand_results.multi_hand_landmarks or []
-
-    all_violations = []  # flat list for backward compatibility
-    persons = []         # per-person breakdown
-
-    if face_results.multi_face_landmarks:
-        for face_idx, face in enumerate(face_results.multi_face_landmarks):
-            person_id = face_idx + 1
-            person_violations = []
-
-            # Calculate face bbox with minor shoulder/head padding
-            xs = [lm.x for lm in face.landmark]
-            ys = [lm.y for lm in face.landmark]
-            x1 = int(max(0, min(xs) * w))
-            y1 = int(max(0, min(ys) * h))
-            x2 = int(min(w - 1, max(xs) * w))
-            y2 = int(min(h - 1, max(ys) * h))
+            hsv  = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
             
-            pad_x = int((x2 - x1) * 0.15)
-            pad_y = int((y2 - y1) * 0.20)
-            x1 = max(0, x1 - pad_x)
-            y1 = max(0, y1 - pad_y)
-            x2 = min(w - 1, x2 + pad_x)
-            y2 = min(h - 1, y2 + pad_y)
-            bbox = [x1, y1, x2, y2]
+            # Double HSV threshold to capture all skin tones (warm, cool, shadows, ethnic variations)
+            skin_mask1 = cv2.inRange(hsv, np.array([0, 8, 30]), np.array([25, 255, 255]))
+            skin_mask2 = cv2.inRange(hsv, np.array([165, 8, 30]), np.array([180, 255, 255]))
+            skin_mask = cv2.bitwise_or(skin_mask1, skin_mask2)
+            
+            skin_ratio = np.sum(skin_mask > 0) / skin_mask.size
+            
+            # If skin-like color occupies > 10% of the palm ROI, bare hand (no gloves) is detected (False)
+            if skin_ratio > 0.10:
+                return False
+    return True
 
-            # MASK CHECK
-            if check_mask(face, frame, h, w):
-                person_violations.append("No Mouth Mask")
-                all_violations.append({"type": "No Mouth Mask", "confidence": 0.91})
+def match_hand_to_face(hand_lm, bboxes, h, w):
+    wrist = hand_lm.landmark[0]
+    hx, hy = wrist.x*w, wrist.y*h
+    best_i, best_d = 0, float('inf')
+    for i, (x1,y1,x2,y2) in enumerate(bboxes):
+        cx, cy = (x1+x2)/2, (y1+y2)/2
+        d = ((hx-cx)**2+(hy-cy)**2)**0.5
+        if d < best_d:
+            best_d, best_i = d, i
+    return best_i
 
-            # NOSE TOUCH — only if hands are present
-            if hand_landmarks_list:
-                if check_nose_touching(face, hand_landmarks_list, h, w):
-                    person_violations.append("Nose Touching")
-                    all_violations.append({"type": "Nose Touching", "confidence": 0.88})
+def smooth_violations(person_id, current):
+    hist = violation_history[person_id]
+    hist.append(set(current))
+    confirmed = []
+    all_types = set()
+    for h in hist:
+        all_types.update(h)
+    for vtype in all_types:
+        count = sum(1 for h in hist if vtype in h)
+        if count >= len(hist) * 0.75:
+            confirmed.append(vtype)
+    return confirmed
 
-                # HAIR TOUCH — only if hands are present
-                if check_hair_touching(face, hand_landmarks_list, h, w):
-                    person_violations.append("Hair Touching")
-                    all_violations.append({"type": "Hair Touching", "confidence": 0.85})
+def get_stable_id(bbox, tracker, w, force_single=False):
+    x1,y1,x2,y2 = bbox
+    cx,cy = (x1+x2)/2, (y1+y2)/2
+    best_id, best_d = None, float('inf')
+    
+    # If there is exactly one person in the frame and tracker, force a match to preserve ID stability
+    if force_single and len(tracker) == 1:
+        return list(tracker.keys())[0]
 
-            persons.append({
-                "id": person_id,
-                "bbox": bbox,
-                "violations": person_violations,
-                "status": "VIOLATION" if person_violations else "CLEAR"
-            })
+    # Scale-invariant matching threshold: 35% of the frame width
+    threshold = w * 0.35
 
-    # GLOVES CHECK — only if hands are visible (applies globally, not per-face)
-    if hand_landmarks_list:
-        if not check_gloves(hand_landmarks_list, frame, h, w):
-            all_violations.append({"type": "No Hand Gloves", "confidence": 0.82})
-            # Assign glove violation to person 1 if persons exist, else create a person entry
-            if persons:
-                persons[0]["violations"].append("No Hand Gloves")
-                persons[0]["status"] = "VIOLATION"
-                if "bbox" not in persons[0]:
-                    hand = hand_landmarks_list[0]
-                    h_xs = [lm.x for lm in hand.landmark]
-                    h_ys = [lm.y for lm in hand.landmark]
-                    hx1 = int(max(0, min(h_xs) * w))
-                    hy1 = int(max(0, min(h_ys) * h))
-                    hx2 = int(min(w - 1, max(h_xs) * w))
-                    hy2 = int(min(h - 1, max(h_ys) * h))
-                    persons[0]["bbox"] = [hx1, hy1, hx2, hy2]
-            else:
-                hand = hand_landmarks_list[0]
-                h_xs = [lm.x for lm in hand.landmark]
-                h_ys = [lm.y for lm in hand.landmark]
-                hx1 = int(max(0, min(h_xs) * w))
-                hy1 = int(max(0, min(h_ys) * h))
-                hx2 = int(min(w - 1, max(h_xs) * w))
-                hy2 = int(min(h - 1, max(h_ys) * h))
-                persons.append({
-                    "id": 1,
-                    "bbox": [hx1, hy1, hx2, hy2],
-                    "violations": ["No Hand Gloves"],
-                    "status": "VIOLATION"
-                })
+    for pid, data in tracker.items():
+        px,py = data['center']
+        d = ((cx-px)**2+(cy-py)**2)**0.5
+        if d < threshold and d < best_d:
+            best_d, best_id = d, pid
+    return best_id
 
-    # Run flat violations through stability filter
-    stable_violations = stabilize_violations(all_violations)
+def update_tracker(persons, w):
+    global person_tracker
+    for pid in person_tracker:
+        person_tracker[pid]['seen'] = False
 
-    # Filter persons to only include stable violations
-    stable_types = {v["type"] for v in stable_violations}
-    stable_persons = []
+    # Force a match if both the frame and tracker contain exactly 1 person
+    force_single = (len(persons) == 1 and len(person_tracker) == 1)
+
+    # Compute next_id based on non-stale active keys to avoid permanent increment leaks
+    active_keys = [pid for pid, d in person_tracker.items() if d.get('seen', True) or d.get('age', 0) < 45]
+    if active_keys:
+        next_id = max(active_keys) + 1
+    else:
+        next_id = 1
+
+    result  = []
+
     for p in persons:
-        stable_p_violations = [v for v in p["violations"] if v in stable_types]
-        stable_persons.append({
-            "id": p["id"],
-            "bbox": p.get("bbox"),
-            "violations": stable_p_violations,
-            "status": "VIOLATION" if stable_p_violations else "CLEAR"
+        bbox = p['bbox']
+        x1,y1,x2,y2 = bbox
+        cx,cy = (x1+x2)/2,(y1+y2)/2
+        matched = get_stable_id(bbox, person_tracker, w, force_single=force_single)
+
+        if matched is not None:
+            person_tracker[matched].update(
+                {'center':(cx,cy),'seen':True,'age':0})
+            stable_id = matched
+        else:
+            person_tracker[next_id] = {
+                'center':(cx,cy),'seen':True,'age':0}
+            stable_id = next_id
+            next_id  += 1
+
+        result.append({**p, 'id': stable_id})
+
+    # Remove stale tracks after 45 frames (approx. 1.5 seconds of persistent loss)
+    stale = [pid for pid,d in person_tracker.items()
+             if not d['seen'] and
+             person_tracker[pid].setdefault('age',0)+1 > 45]
+    for pid in stale:
+        del person_tracker[pid]
+    for pid in person_tracker:
+        if not person_tracker[pid]['seen']:
+            person_tracker[pid]['age'] = \
+                person_tracker[pid].get('age',0)+1
+
+    return result
+
+def analyze_frame(frame):
+    proc    = preprocess_frame(frame)
+    ph, pw  = proc.shape[:2]
+    oh, ow  = frame.shape[:2]
+    sx, sy  = ow/pw, oh/ph
+    rgb     = cv2.cvtColor(proc, cv2.COLOR_BGR2RGB)
+
+    # Robust detection — try boosted if no faces
+    face_res = face_mesh.process(rgb)
+    if not face_res.multi_face_landmarks:
+        boosted = cv2.convertScaleAbs(
+            cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR),
+            alpha=1.3, beta=15)
+        face_res = face_mesh.process(
+            cv2.cvtColor(boosted, cv2.COLOR_BGR2RGB))
+
+    hand_res  = hands.process(rgb)
+    hand_list = hand_res.multi_hand_landmarks or []
+
+    bboxes  = []
+    persons = []
+
+    if face_res.multi_face_landmarks:
+        for face in face_res.multi_face_landmarks:
+            x1,y1,x2,y2 = get_face_bbox(face, ph, pw)
+            bboxes.append((
+                int(x1*sx), int(y1*sy),
+                int(x2*sx), int(y2*sy)
+            ))
+
+    for idx, face in enumerate(
+            face_res.multi_face_landmarks or []):
+        x1,y1,x2,y2 = bboxes[idx]
+        viols = []
+
+        # Calculate face height dynamically for scale-invariant distance checking
+        forehead = face.landmark[10]
+        chin = face.landmark[152]
+        face_height_px = abs(forehead.y - chin.y) * ph
+
+        if not check_mask(face, proc, ph, pw, face_height_px):
+            viols.append("No Mouth Mask")
+
+        matched_hands = [
+            hl for hi,hl in enumerate(hand_list)
+            if match_hand_to_face(hl,bboxes,oh,ow)==idx
+        ]
+        if matched_hands:
+            if check_nose_touch(face, matched_hands, ph, pw, face_height_px):
+                viols.append("Nose Touching")
+            if check_hair_touch(face, matched_hands, ph, pw, face_height_px):
+                viols.append("Hair Touching")
+            if not check_gloves(matched_hands, frame, oh, ow):
+                viols.append("No Hand Gloves")
+
+        viols = smooth_violations(idx, viols)
+        persons.append({
+            "id":         idx+1,
+            "bbox":       [x1,y1,x2,y2],
+            "violations": viols,
+            "status":     "VIOLATION" if viols else "CLEAR"
         })
 
-    return {
-        "total_persons": len(stable_persons),
-        "persons": stable_persons,
-        "violations": stable_violations
-    }
+    persons = update_tracker(persons, pw)
+    return {"total_persons": len(persons), "persons": persons}
